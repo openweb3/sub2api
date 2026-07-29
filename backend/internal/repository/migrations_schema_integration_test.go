@@ -191,6 +191,83 @@ func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) 
 	requireIndexAbsent(t, tx, "payment_orders", "paymentorder_out_trade_no_unique")
 }
 
+func TestMigrationsRunner_BeeSchemaMatchesDataModel(t *testing.T) {
+	tx := testTx(t)
+
+	requireColumn(t, tx, "bee", "id", "bigint", 0, false)
+	requireColumn(t, tx, "bee", "user_id", "bigint", 0, false)
+	requireColumn(t, tx, "bee", "device_id", "uuid", 0, false)
+	requireColumn(t, tx, "bee", "name", "character varying", 100, false)
+	requireColumn(t, tx, "bee", "status", "character varying", 20, false)
+	requireColumn(t, tx, "bee", "credential_hash", "character varying", 0, false)
+	requireColumn(t, tx, "bee", "credential_created_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "bee", "app_version", "character varying", 50, true)
+	requireColumn(t, tx, "bee", "last_connected_at", "timestamp with time zone", 0, true)
+	requireColumn(t, tx, "bee", "last_disconnected_at", "timestamp with time zone", 0, true)
+	requireColumn(t, tx, "bee", "last_seen_at", "timestamp with time zone", 0, true)
+	requireColumn(t, tx, "bee", "created_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "bee", "updated_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "bee", "deleted_at", "timestamp with time zone", 0, true)
+	requireForeignKeyOnDelete(t, tx, "bee", "user_id", "users", "NO ACTION")
+	requireConstraintDefinitionContains(t, tx, "bee", "bee_device_id_unique", "UNIQUE", "device_id")
+	requireIndex(t, tx, "bee", "idx_bee_user_id")
+	requireIndex(t, tx, "bee", "idx_bee_status")
+	requireIndex(t, tx, "bee", "idx_bee_deleted_at")
+
+	requireColumn(t, tx, "bee_platform", "id", "bigint", 0, false)
+	requireColumn(t, tx, "bee_platform", "bee_id", "bigint", 0, false)
+	requireColumn(t, tx, "bee_platform", "platform", "character varying", 50, false)
+	requireColumn(t, tx, "bee_platform", "upstream_account_key", "character varying", 64, false)
+	requireColumn(t, tx, "bee_platform", "identity_version", "smallint", 0, false)
+	requireColumn(t, tx, "bee_platform", "subscription_tier", "character varying", 50, true)
+	requireColumn(t, tx, "bee_platform", "concurrency", "integer", 0, false)
+	requireColumn(t, tx, "bee_platform", "quota_snapshot", "jsonb", 0, false)
+	requireColumn(t, tx, "bee_platform", "quota_updated_at", "timestamp with time zone", 0, true)
+	requireColumn(t, tx, "bee_platform", "last_task_at", "timestamp with time zone", 0, true)
+	requireColumn(t, tx, "bee_platform", "status", "character varying", 20, false)
+	requireColumn(t, tx, "bee_platform", "extra", "jsonb", 0, false)
+	requireColumn(t, tx, "bee_platform", "created_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "bee_platform", "updated_at", "timestamp with time zone", 0, false)
+	requireColumn(t, tx, "bee_platform", "deleted_at", "timestamp with time zone", 0, true)
+	requireColumnDefaultContains(t, tx, "bee_platform", "identity_version", "1")
+	requireColumnDefaultContains(t, tx, "bee_platform", "quota_snapshot", "'{}'::jsonb")
+	requireColumnDefaultContains(t, tx, "bee_platform", "extra", "'{}'::jsonb")
+	requireForeignKeyOnDelete(t, tx, "bee_platform", "bee_id", "bee", "NO ACTION")
+	requireConstraintDefinitionContains(
+		t,
+		tx,
+		"bee_platform",
+		"bee_platform_platform_check",
+		"'openai'",
+		"'anthropic'",
+		"'gemini'",
+		"'grok'",
+	)
+	requireConstraintDefinitionContains(t, tx, "bee_platform", "bee_platform_concurrency_check", "concurrency > 0")
+	requireIndex(t, tx, "bee_platform", "idx_bee_platform_bee_id")
+	requireIndex(t, tx, "bee_platform", "idx_bee_platform_platform")
+	requireIndex(t, tx, "bee_platform", "idx_bee_platform_status")
+	requireIndex(t, tx, "bee_platform", "idx_bee_platform_deleted_at")
+	requirePartialUniqueIndexDefinition(
+		t,
+		tx,
+		"bee_platform",
+		"uq_bee_platform_active_bee_platform",
+		"bee_id",
+		"platform",
+		"WHERE (deleted_at IS NULL)",
+	)
+	requirePartialUniqueIndexDefinition(
+		t,
+		tx,
+		"bee_platform",
+		"uq_bee_platform_active_account",
+		"platform",
+		"upstream_account_key",
+		"WHERE (deleted_at IS NULL)",
+	)
+}
+
 func requireIndex(t *testing.T, tx *sql.Tx, table, index string) {
 	t.Helper()
 
