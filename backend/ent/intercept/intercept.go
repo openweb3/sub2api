@@ -18,6 +18,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/batchimageevent"
 	"github.com/Wei-Shaw/sub2api/ent/batchimageitem"
 	"github.com/Wei-Shaw/sub2api/ent/batchimagejob"
+	"github.com/Wei-Shaw/sub2api/ent/bee"
+	"github.com/Wei-Shaw/sub2api/ent/beeplatform"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
@@ -374,6 +376,60 @@ func (f TraverseBatchImageJob) Traverse(ctx context.Context, q ent.Query) error 
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.BatchImageJobQuery", q)
+}
+
+// The BeeFunc type is an adapter to allow the use of ordinary function as a Querier.
+type BeeFunc func(context.Context, *ent.BeeQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f BeeFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.BeeQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.BeeQuery", q)
+}
+
+// The TraverseBee type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseBee func(context.Context, *ent.BeeQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseBee) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseBee) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.BeeQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.BeeQuery", q)
+}
+
+// The BeePlatformFunc type is an adapter to allow the use of ordinary function as a Querier.
+type BeePlatformFunc func(context.Context, *ent.BeePlatformQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f BeePlatformFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.BeePlatformQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.BeePlatformQuery", q)
+}
+
+// The TraverseBeePlatform type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseBeePlatform func(context.Context, *ent.BeePlatformQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseBeePlatform) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseBeePlatform) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.BeePlatformQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.BeePlatformQuery", q)
 }
 
 // The ChannelMonitorFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1182,6 +1238,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.BatchImageItemQuery, predicate.BatchImageItem, batchimageitem.OrderOption]{typ: ent.TypeBatchImageItem, tq: q}, nil
 	case *ent.BatchImageJobQuery:
 		return &query[*ent.BatchImageJobQuery, predicate.BatchImageJob, batchimagejob.OrderOption]{typ: ent.TypeBatchImageJob, tq: q}, nil
+	case *ent.BeeQuery:
+		return &query[*ent.BeeQuery, predicate.Bee, bee.OrderOption]{typ: ent.TypeBee, tq: q}, nil
+	case *ent.BeePlatformQuery:
+		return &query[*ent.BeePlatformQuery, predicate.BeePlatform, beeplatform.OrderOption]{typ: ent.TypeBeePlatform, tq: q}, nil
 	case *ent.ChannelMonitorQuery:
 		return &query[*ent.ChannelMonitorQuery, predicate.ChannelMonitor, channelmonitor.OrderOption]{typ: ent.TypeChannelMonitor, tq: q}, nil
 	case *ent.ChannelMonitorDailyRollupQuery:

@@ -22,6 +22,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/batchimageevent"
 	"github.com/Wei-Shaw/sub2api/ent/batchimageitem"
 	"github.com/Wei-Shaw/sub2api/ent/batchimagejob"
+	"github.com/Wei-Shaw/sub2api/ent/bee"
+	"github.com/Wei-Shaw/sub2api/ent/beeplatform"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
@@ -53,6 +55,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/google/uuid"
 )
 
 const (
@@ -74,6 +77,8 @@ const (
 	TypeBatchImageEvent               = "BatchImageEvent"
 	TypeBatchImageItem                = "BatchImageItem"
 	TypeBatchImageJob                 = "BatchImageJob"
+	TypeBee                           = "Bee"
+	TypeBeePlatform                   = "BeePlatform"
 	TypeChannelMonitor                = "ChannelMonitor"
 	TypeChannelMonitorDailyRollup     = "ChannelMonitorDailyRollup"
 	TypeChannelMonitorHistory         = "ChannelMonitorHistory"
@@ -14596,6 +14601,2450 @@ func (m *BatchImageJobMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *BatchImageJobMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown BatchImageJob edge %s", name)
+}
+
+// BeeMutation represents an operation that mutates the Bee nodes in the graph.
+type BeeMutation struct {
+	config
+	op                    Op
+	typ                   string
+	id                    *int64
+	created_at            *time.Time
+	updated_at            *time.Time
+	deleted_at            *time.Time
+	device_id             *uuid.UUID
+	name                  *string
+	status                *string
+	credential_hash       *string
+	credential_created_at *time.Time
+	app_version           *string
+	last_connected_at     *time.Time
+	last_disconnected_at  *time.Time
+	last_seen_at          *time.Time
+	clearedFields         map[string]struct{}
+	user                  *int64
+	cleareduser           bool
+	platforms             map[int64]struct{}
+	removedplatforms      map[int64]struct{}
+	clearedplatforms      bool
+	done                  bool
+	oldValue              func(context.Context) (*Bee, error)
+	predicates            []predicate.Bee
+}
+
+var _ ent.Mutation = (*BeeMutation)(nil)
+
+// beeOption allows management of the mutation configuration using functional options.
+type beeOption func(*BeeMutation)
+
+// newBeeMutation creates new mutation for the Bee entity.
+func newBeeMutation(c config, op Op, opts ...beeOption) *BeeMutation {
+	m := &BeeMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeBee,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withBeeID sets the ID field of the mutation.
+func withBeeID(id int64) beeOption {
+	return func(m *BeeMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *Bee
+		)
+		m.oldValue = func(ctx context.Context) (*Bee, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().Bee.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withBee sets the old Bee of the mutation.
+func withBee(node *Bee) beeOption {
+	return func(m *BeeMutation) {
+		m.oldValue = func(context.Context) (*Bee, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m BeeMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m BeeMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *BeeMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *BeeMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().Bee.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *BeeMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *BeeMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *BeeMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *BeeMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *BeeMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *BeeMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *BeeMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *BeeMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *BeeMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[bee.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *BeeMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[bee.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *BeeMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, bee.FieldDeletedAt)
+}
+
+// SetUserID sets the "user_id" field.
+func (m *BeeMutation) SetUserID(i int64) {
+	m.user = &i
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *BeeMutation) UserID() (r int64, exists bool) {
+	v := m.user
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *BeeMutation) ResetUserID() {
+	m.user = nil
+}
+
+// SetDeviceID sets the "device_id" field.
+func (m *BeeMutation) SetDeviceID(u uuid.UUID) {
+	m.device_id = &u
+}
+
+// DeviceID returns the value of the "device_id" field in the mutation.
+func (m *BeeMutation) DeviceID() (r uuid.UUID, exists bool) {
+	v := m.device_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeviceID returns the old "device_id" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldDeviceID(ctx context.Context) (v uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeviceID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeviceID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeviceID: %w", err)
+	}
+	return oldValue.DeviceID, nil
+}
+
+// ResetDeviceID resets all changes to the "device_id" field.
+func (m *BeeMutation) ResetDeviceID() {
+	m.device_id = nil
+}
+
+// SetName sets the "name" field.
+func (m *BeeMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *BeeMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *BeeMutation) ResetName() {
+	m.name = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *BeeMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *BeeMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *BeeMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetCredentialHash sets the "credential_hash" field.
+func (m *BeeMutation) SetCredentialHash(s string) {
+	m.credential_hash = &s
+}
+
+// CredentialHash returns the value of the "credential_hash" field in the mutation.
+func (m *BeeMutation) CredentialHash() (r string, exists bool) {
+	v := m.credential_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialHash returns the old "credential_hash" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldCredentialHash(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialHash: %w", err)
+	}
+	return oldValue.CredentialHash, nil
+}
+
+// ResetCredentialHash resets all changes to the "credential_hash" field.
+func (m *BeeMutation) ResetCredentialHash() {
+	m.credential_hash = nil
+}
+
+// SetCredentialCreatedAt sets the "credential_created_at" field.
+func (m *BeeMutation) SetCredentialCreatedAt(t time.Time) {
+	m.credential_created_at = &t
+}
+
+// CredentialCreatedAt returns the value of the "credential_created_at" field in the mutation.
+func (m *BeeMutation) CredentialCreatedAt() (r time.Time, exists bool) {
+	v := m.credential_created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCredentialCreatedAt returns the old "credential_created_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldCredentialCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCredentialCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCredentialCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCredentialCreatedAt: %w", err)
+	}
+	return oldValue.CredentialCreatedAt, nil
+}
+
+// ResetCredentialCreatedAt resets all changes to the "credential_created_at" field.
+func (m *BeeMutation) ResetCredentialCreatedAt() {
+	m.credential_created_at = nil
+}
+
+// SetAppVersion sets the "app_version" field.
+func (m *BeeMutation) SetAppVersion(s string) {
+	m.app_version = &s
+}
+
+// AppVersion returns the value of the "app_version" field in the mutation.
+func (m *BeeMutation) AppVersion() (r string, exists bool) {
+	v := m.app_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAppVersion returns the old "app_version" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldAppVersion(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAppVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAppVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAppVersion: %w", err)
+	}
+	return oldValue.AppVersion, nil
+}
+
+// ClearAppVersion clears the value of the "app_version" field.
+func (m *BeeMutation) ClearAppVersion() {
+	m.app_version = nil
+	m.clearedFields[bee.FieldAppVersion] = struct{}{}
+}
+
+// AppVersionCleared returns if the "app_version" field was cleared in this mutation.
+func (m *BeeMutation) AppVersionCleared() bool {
+	_, ok := m.clearedFields[bee.FieldAppVersion]
+	return ok
+}
+
+// ResetAppVersion resets all changes to the "app_version" field.
+func (m *BeeMutation) ResetAppVersion() {
+	m.app_version = nil
+	delete(m.clearedFields, bee.FieldAppVersion)
+}
+
+// SetLastConnectedAt sets the "last_connected_at" field.
+func (m *BeeMutation) SetLastConnectedAt(t time.Time) {
+	m.last_connected_at = &t
+}
+
+// LastConnectedAt returns the value of the "last_connected_at" field in the mutation.
+func (m *BeeMutation) LastConnectedAt() (r time.Time, exists bool) {
+	v := m.last_connected_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastConnectedAt returns the old "last_connected_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldLastConnectedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastConnectedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastConnectedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastConnectedAt: %w", err)
+	}
+	return oldValue.LastConnectedAt, nil
+}
+
+// ClearLastConnectedAt clears the value of the "last_connected_at" field.
+func (m *BeeMutation) ClearLastConnectedAt() {
+	m.last_connected_at = nil
+	m.clearedFields[bee.FieldLastConnectedAt] = struct{}{}
+}
+
+// LastConnectedAtCleared returns if the "last_connected_at" field was cleared in this mutation.
+func (m *BeeMutation) LastConnectedAtCleared() bool {
+	_, ok := m.clearedFields[bee.FieldLastConnectedAt]
+	return ok
+}
+
+// ResetLastConnectedAt resets all changes to the "last_connected_at" field.
+func (m *BeeMutation) ResetLastConnectedAt() {
+	m.last_connected_at = nil
+	delete(m.clearedFields, bee.FieldLastConnectedAt)
+}
+
+// SetLastDisconnectedAt sets the "last_disconnected_at" field.
+func (m *BeeMutation) SetLastDisconnectedAt(t time.Time) {
+	m.last_disconnected_at = &t
+}
+
+// LastDisconnectedAt returns the value of the "last_disconnected_at" field in the mutation.
+func (m *BeeMutation) LastDisconnectedAt() (r time.Time, exists bool) {
+	v := m.last_disconnected_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastDisconnectedAt returns the old "last_disconnected_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldLastDisconnectedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastDisconnectedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastDisconnectedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastDisconnectedAt: %w", err)
+	}
+	return oldValue.LastDisconnectedAt, nil
+}
+
+// ClearLastDisconnectedAt clears the value of the "last_disconnected_at" field.
+func (m *BeeMutation) ClearLastDisconnectedAt() {
+	m.last_disconnected_at = nil
+	m.clearedFields[bee.FieldLastDisconnectedAt] = struct{}{}
+}
+
+// LastDisconnectedAtCleared returns if the "last_disconnected_at" field was cleared in this mutation.
+func (m *BeeMutation) LastDisconnectedAtCleared() bool {
+	_, ok := m.clearedFields[bee.FieldLastDisconnectedAt]
+	return ok
+}
+
+// ResetLastDisconnectedAt resets all changes to the "last_disconnected_at" field.
+func (m *BeeMutation) ResetLastDisconnectedAt() {
+	m.last_disconnected_at = nil
+	delete(m.clearedFields, bee.FieldLastDisconnectedAt)
+}
+
+// SetLastSeenAt sets the "last_seen_at" field.
+func (m *BeeMutation) SetLastSeenAt(t time.Time) {
+	m.last_seen_at = &t
+}
+
+// LastSeenAt returns the value of the "last_seen_at" field in the mutation.
+func (m *BeeMutation) LastSeenAt() (r time.Time, exists bool) {
+	v := m.last_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastSeenAt returns the old "last_seen_at" field's value of the Bee entity.
+// If the Bee object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeeMutation) OldLastSeenAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastSeenAt: %w", err)
+	}
+	return oldValue.LastSeenAt, nil
+}
+
+// ClearLastSeenAt clears the value of the "last_seen_at" field.
+func (m *BeeMutation) ClearLastSeenAt() {
+	m.last_seen_at = nil
+	m.clearedFields[bee.FieldLastSeenAt] = struct{}{}
+}
+
+// LastSeenAtCleared returns if the "last_seen_at" field was cleared in this mutation.
+func (m *BeeMutation) LastSeenAtCleared() bool {
+	_, ok := m.clearedFields[bee.FieldLastSeenAt]
+	return ok
+}
+
+// ResetLastSeenAt resets all changes to the "last_seen_at" field.
+func (m *BeeMutation) ResetLastSeenAt() {
+	m.last_seen_at = nil
+	delete(m.clearedFields, bee.FieldLastSeenAt)
+}
+
+// ClearUser clears the "user" edge to the User entity.
+func (m *BeeMutation) ClearUser() {
+	m.cleareduser = true
+	m.clearedFields[bee.FieldUserID] = struct{}{}
+}
+
+// UserCleared reports if the "user" edge to the User entity was cleared.
+func (m *BeeMutation) UserCleared() bool {
+	return m.cleareduser
+}
+
+// UserIDs returns the "user" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// UserID instead. It exists only for internal usage by the builders.
+func (m *BeeMutation) UserIDs() (ids []int64) {
+	if id := m.user; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetUser resets all changes to the "user" edge.
+func (m *BeeMutation) ResetUser() {
+	m.user = nil
+	m.cleareduser = false
+}
+
+// AddPlatformIDs adds the "platforms" edge to the BeePlatform entity by ids.
+func (m *BeeMutation) AddPlatformIDs(ids ...int64) {
+	if m.platforms == nil {
+		m.platforms = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.platforms[ids[i]] = struct{}{}
+	}
+}
+
+// ClearPlatforms clears the "platforms" edge to the BeePlatform entity.
+func (m *BeeMutation) ClearPlatforms() {
+	m.clearedplatforms = true
+}
+
+// PlatformsCleared reports if the "platforms" edge to the BeePlatform entity was cleared.
+func (m *BeeMutation) PlatformsCleared() bool {
+	return m.clearedplatforms
+}
+
+// RemovePlatformIDs removes the "platforms" edge to the BeePlatform entity by IDs.
+func (m *BeeMutation) RemovePlatformIDs(ids ...int64) {
+	if m.removedplatforms == nil {
+		m.removedplatforms = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.platforms, ids[i])
+		m.removedplatforms[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedPlatforms returns the removed IDs of the "platforms" edge to the BeePlatform entity.
+func (m *BeeMutation) RemovedPlatformsIDs() (ids []int64) {
+	for id := range m.removedplatforms {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// PlatformsIDs returns the "platforms" edge IDs in the mutation.
+func (m *BeeMutation) PlatformsIDs() (ids []int64) {
+	for id := range m.platforms {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetPlatforms resets all changes to the "platforms" edge.
+func (m *BeeMutation) ResetPlatforms() {
+	m.platforms = nil
+	m.clearedplatforms = false
+	m.removedplatforms = nil
+}
+
+// Where appends a list predicates to the BeeMutation builder.
+func (m *BeeMutation) Where(ps ...predicate.Bee) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the BeeMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *BeeMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.Bee, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *BeeMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *BeeMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (Bee).
+func (m *BeeMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *BeeMutation) Fields() []string {
+	fields := make([]string, 0, 13)
+	if m.created_at != nil {
+		fields = append(fields, bee.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, bee.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, bee.FieldDeletedAt)
+	}
+	if m.user != nil {
+		fields = append(fields, bee.FieldUserID)
+	}
+	if m.device_id != nil {
+		fields = append(fields, bee.FieldDeviceID)
+	}
+	if m.name != nil {
+		fields = append(fields, bee.FieldName)
+	}
+	if m.status != nil {
+		fields = append(fields, bee.FieldStatus)
+	}
+	if m.credential_hash != nil {
+		fields = append(fields, bee.FieldCredentialHash)
+	}
+	if m.credential_created_at != nil {
+		fields = append(fields, bee.FieldCredentialCreatedAt)
+	}
+	if m.app_version != nil {
+		fields = append(fields, bee.FieldAppVersion)
+	}
+	if m.last_connected_at != nil {
+		fields = append(fields, bee.FieldLastConnectedAt)
+	}
+	if m.last_disconnected_at != nil {
+		fields = append(fields, bee.FieldLastDisconnectedAt)
+	}
+	if m.last_seen_at != nil {
+		fields = append(fields, bee.FieldLastSeenAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *BeeMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case bee.FieldCreatedAt:
+		return m.CreatedAt()
+	case bee.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case bee.FieldDeletedAt:
+		return m.DeletedAt()
+	case bee.FieldUserID:
+		return m.UserID()
+	case bee.FieldDeviceID:
+		return m.DeviceID()
+	case bee.FieldName:
+		return m.Name()
+	case bee.FieldStatus:
+		return m.Status()
+	case bee.FieldCredentialHash:
+		return m.CredentialHash()
+	case bee.FieldCredentialCreatedAt:
+		return m.CredentialCreatedAt()
+	case bee.FieldAppVersion:
+		return m.AppVersion()
+	case bee.FieldLastConnectedAt:
+		return m.LastConnectedAt()
+	case bee.FieldLastDisconnectedAt:
+		return m.LastDisconnectedAt()
+	case bee.FieldLastSeenAt:
+		return m.LastSeenAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *BeeMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case bee.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case bee.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case bee.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case bee.FieldUserID:
+		return m.OldUserID(ctx)
+	case bee.FieldDeviceID:
+		return m.OldDeviceID(ctx)
+	case bee.FieldName:
+		return m.OldName(ctx)
+	case bee.FieldStatus:
+		return m.OldStatus(ctx)
+	case bee.FieldCredentialHash:
+		return m.OldCredentialHash(ctx)
+	case bee.FieldCredentialCreatedAt:
+		return m.OldCredentialCreatedAt(ctx)
+	case bee.FieldAppVersion:
+		return m.OldAppVersion(ctx)
+	case bee.FieldLastConnectedAt:
+		return m.OldLastConnectedAt(ctx)
+	case bee.FieldLastDisconnectedAt:
+		return m.OldLastDisconnectedAt(ctx)
+	case bee.FieldLastSeenAt:
+		return m.OldLastSeenAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown Bee field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *BeeMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case bee.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case bee.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case bee.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case bee.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case bee.FieldDeviceID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeviceID(v)
+		return nil
+	case bee.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case bee.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case bee.FieldCredentialHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialHash(v)
+		return nil
+	case bee.FieldCredentialCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCredentialCreatedAt(v)
+		return nil
+	case bee.FieldAppVersion:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAppVersion(v)
+		return nil
+	case bee.FieldLastConnectedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastConnectedAt(v)
+		return nil
+	case bee.FieldLastDisconnectedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastDisconnectedAt(v)
+		return nil
+	case bee.FieldLastSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastSeenAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown Bee field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *BeeMutation) AddedFields() []string {
+	var fields []string
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *BeeMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *BeeMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown Bee numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *BeeMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(bee.FieldDeletedAt) {
+		fields = append(fields, bee.FieldDeletedAt)
+	}
+	if m.FieldCleared(bee.FieldAppVersion) {
+		fields = append(fields, bee.FieldAppVersion)
+	}
+	if m.FieldCleared(bee.FieldLastConnectedAt) {
+		fields = append(fields, bee.FieldLastConnectedAt)
+	}
+	if m.FieldCleared(bee.FieldLastDisconnectedAt) {
+		fields = append(fields, bee.FieldLastDisconnectedAt)
+	}
+	if m.FieldCleared(bee.FieldLastSeenAt) {
+		fields = append(fields, bee.FieldLastSeenAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *BeeMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *BeeMutation) ClearField(name string) error {
+	switch name {
+	case bee.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	case bee.FieldAppVersion:
+		m.ClearAppVersion()
+		return nil
+	case bee.FieldLastConnectedAt:
+		m.ClearLastConnectedAt()
+		return nil
+	case bee.FieldLastDisconnectedAt:
+		m.ClearLastDisconnectedAt()
+		return nil
+	case bee.FieldLastSeenAt:
+		m.ClearLastSeenAt()
+		return nil
+	}
+	return fmt.Errorf("unknown Bee nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *BeeMutation) ResetField(name string) error {
+	switch name {
+	case bee.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case bee.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case bee.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case bee.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case bee.FieldDeviceID:
+		m.ResetDeviceID()
+		return nil
+	case bee.FieldName:
+		m.ResetName()
+		return nil
+	case bee.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case bee.FieldCredentialHash:
+		m.ResetCredentialHash()
+		return nil
+	case bee.FieldCredentialCreatedAt:
+		m.ResetCredentialCreatedAt()
+		return nil
+	case bee.FieldAppVersion:
+		m.ResetAppVersion()
+		return nil
+	case bee.FieldLastConnectedAt:
+		m.ResetLastConnectedAt()
+		return nil
+	case bee.FieldLastDisconnectedAt:
+		m.ResetLastDisconnectedAt()
+		return nil
+	case bee.FieldLastSeenAt:
+		m.ResetLastSeenAt()
+		return nil
+	}
+	return fmt.Errorf("unknown Bee field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *BeeMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.user != nil {
+		edges = append(edges, bee.EdgeUser)
+	}
+	if m.platforms != nil {
+		edges = append(edges, bee.EdgePlatforms)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *BeeMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case bee.EdgeUser:
+		if id := m.user; id != nil {
+			return []ent.Value{*id}
+		}
+	case bee.EdgePlatforms:
+		ids := make([]ent.Value, 0, len(m.platforms))
+		for id := range m.platforms {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *BeeMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.removedplatforms != nil {
+		edges = append(edges, bee.EdgePlatforms)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *BeeMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case bee.EdgePlatforms:
+		ids := make([]ent.Value, 0, len(m.removedplatforms))
+		for id := range m.removedplatforms {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *BeeMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.cleareduser {
+		edges = append(edges, bee.EdgeUser)
+	}
+	if m.clearedplatforms {
+		edges = append(edges, bee.EdgePlatforms)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *BeeMutation) EdgeCleared(name string) bool {
+	switch name {
+	case bee.EdgeUser:
+		return m.cleareduser
+	case bee.EdgePlatforms:
+		return m.clearedplatforms
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *BeeMutation) ClearEdge(name string) error {
+	switch name {
+	case bee.EdgeUser:
+		m.ClearUser()
+		return nil
+	}
+	return fmt.Errorf("unknown Bee unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *BeeMutation) ResetEdge(name string) error {
+	switch name {
+	case bee.EdgeUser:
+		m.ResetUser()
+		return nil
+	case bee.EdgePlatforms:
+		m.ResetPlatforms()
+		return nil
+	}
+	return fmt.Errorf("unknown Bee edge %s", name)
+}
+
+// BeePlatformMutation represents an operation that mutates the BeePlatform nodes in the graph.
+type BeePlatformMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *int64
+	created_at           *time.Time
+	updated_at           *time.Time
+	deleted_at           *time.Time
+	platform             *string
+	upstream_account_key *string
+	identity_version     *int16
+	addidentity_version  *int16
+	subscription_tier    *string
+	concurrency          *int
+	addconcurrency       *int
+	quota_snapshot       *map[string]interface{}
+	quota_updated_at     *time.Time
+	last_task_at         *time.Time
+	status               *string
+	extra                *map[string]interface{}
+	clearedFields        map[string]struct{}
+	bee                  *int64
+	clearedbee           bool
+	done                 bool
+	oldValue             func(context.Context) (*BeePlatform, error)
+	predicates           []predicate.BeePlatform
+}
+
+var _ ent.Mutation = (*BeePlatformMutation)(nil)
+
+// beeplatformOption allows management of the mutation configuration using functional options.
+type beeplatformOption func(*BeePlatformMutation)
+
+// newBeePlatformMutation creates new mutation for the BeePlatform entity.
+func newBeePlatformMutation(c config, op Op, opts ...beeplatformOption) *BeePlatformMutation {
+	m := &BeePlatformMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeBeePlatform,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withBeePlatformID sets the ID field of the mutation.
+func withBeePlatformID(id int64) beeplatformOption {
+	return func(m *BeePlatformMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *BeePlatform
+		)
+		m.oldValue = func(ctx context.Context) (*BeePlatform, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().BeePlatform.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withBeePlatform sets the old BeePlatform of the mutation.
+func withBeePlatform(node *BeePlatform) beeplatformOption {
+	return func(m *BeePlatformMutation) {
+		m.oldValue = func(context.Context) (*BeePlatform, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m BeePlatformMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m BeePlatformMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *BeePlatformMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *BeePlatformMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().BeePlatform.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *BeePlatformMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *BeePlatformMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *BeePlatformMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *BeePlatformMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *BeePlatformMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *BeePlatformMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeletedAt sets the "deleted_at" field.
+func (m *BeePlatformMutation) SetDeletedAt(t time.Time) {
+	m.deleted_at = &t
+}
+
+// DeletedAt returns the value of the "deleted_at" field in the mutation.
+func (m *BeePlatformMutation) DeletedAt() (r time.Time, exists bool) {
+	v := m.deleted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeletedAt returns the old "deleted_at" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldDeletedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeletedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeletedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeletedAt: %w", err)
+	}
+	return oldValue.DeletedAt, nil
+}
+
+// ClearDeletedAt clears the value of the "deleted_at" field.
+func (m *BeePlatformMutation) ClearDeletedAt() {
+	m.deleted_at = nil
+	m.clearedFields[beeplatform.FieldDeletedAt] = struct{}{}
+}
+
+// DeletedAtCleared returns if the "deleted_at" field was cleared in this mutation.
+func (m *BeePlatformMutation) DeletedAtCleared() bool {
+	_, ok := m.clearedFields[beeplatform.FieldDeletedAt]
+	return ok
+}
+
+// ResetDeletedAt resets all changes to the "deleted_at" field.
+func (m *BeePlatformMutation) ResetDeletedAt() {
+	m.deleted_at = nil
+	delete(m.clearedFields, beeplatform.FieldDeletedAt)
+}
+
+// SetBeeID sets the "bee_id" field.
+func (m *BeePlatformMutation) SetBeeID(i int64) {
+	m.bee = &i
+}
+
+// BeeID returns the value of the "bee_id" field in the mutation.
+func (m *BeePlatformMutation) BeeID() (r int64, exists bool) {
+	v := m.bee
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBeeID returns the old "bee_id" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldBeeID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBeeID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBeeID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBeeID: %w", err)
+	}
+	return oldValue.BeeID, nil
+}
+
+// ResetBeeID resets all changes to the "bee_id" field.
+func (m *BeePlatformMutation) ResetBeeID() {
+	m.bee = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *BeePlatformMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *BeePlatformMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *BeePlatformMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetUpstreamAccountKey sets the "upstream_account_key" field.
+func (m *BeePlatformMutation) SetUpstreamAccountKey(s string) {
+	m.upstream_account_key = &s
+}
+
+// UpstreamAccountKey returns the value of the "upstream_account_key" field in the mutation.
+func (m *BeePlatformMutation) UpstreamAccountKey() (r string, exists bool) {
+	v := m.upstream_account_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpstreamAccountKey returns the old "upstream_account_key" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldUpstreamAccountKey(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpstreamAccountKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpstreamAccountKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpstreamAccountKey: %w", err)
+	}
+	return oldValue.UpstreamAccountKey, nil
+}
+
+// ResetUpstreamAccountKey resets all changes to the "upstream_account_key" field.
+func (m *BeePlatformMutation) ResetUpstreamAccountKey() {
+	m.upstream_account_key = nil
+}
+
+// SetIdentityVersion sets the "identity_version" field.
+func (m *BeePlatformMutation) SetIdentityVersion(i int16) {
+	m.identity_version = &i
+	m.addidentity_version = nil
+}
+
+// IdentityVersion returns the value of the "identity_version" field in the mutation.
+func (m *BeePlatformMutation) IdentityVersion() (r int16, exists bool) {
+	v := m.identity_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldIdentityVersion returns the old "identity_version" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldIdentityVersion(ctx context.Context) (v int16, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldIdentityVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldIdentityVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldIdentityVersion: %w", err)
+	}
+	return oldValue.IdentityVersion, nil
+}
+
+// AddIdentityVersion adds i to the "identity_version" field.
+func (m *BeePlatformMutation) AddIdentityVersion(i int16) {
+	if m.addidentity_version != nil {
+		*m.addidentity_version += i
+	} else {
+		m.addidentity_version = &i
+	}
+}
+
+// AddedIdentityVersion returns the value that was added to the "identity_version" field in this mutation.
+func (m *BeePlatformMutation) AddedIdentityVersion() (r int16, exists bool) {
+	v := m.addidentity_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetIdentityVersion resets all changes to the "identity_version" field.
+func (m *BeePlatformMutation) ResetIdentityVersion() {
+	m.identity_version = nil
+	m.addidentity_version = nil
+}
+
+// SetSubscriptionTier sets the "subscription_tier" field.
+func (m *BeePlatformMutation) SetSubscriptionTier(s string) {
+	m.subscription_tier = &s
+}
+
+// SubscriptionTier returns the value of the "subscription_tier" field in the mutation.
+func (m *BeePlatformMutation) SubscriptionTier() (r string, exists bool) {
+	v := m.subscription_tier
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSubscriptionTier returns the old "subscription_tier" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldSubscriptionTier(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSubscriptionTier is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSubscriptionTier requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSubscriptionTier: %w", err)
+	}
+	return oldValue.SubscriptionTier, nil
+}
+
+// ClearSubscriptionTier clears the value of the "subscription_tier" field.
+func (m *BeePlatformMutation) ClearSubscriptionTier() {
+	m.subscription_tier = nil
+	m.clearedFields[beeplatform.FieldSubscriptionTier] = struct{}{}
+}
+
+// SubscriptionTierCleared returns if the "subscription_tier" field was cleared in this mutation.
+func (m *BeePlatformMutation) SubscriptionTierCleared() bool {
+	_, ok := m.clearedFields[beeplatform.FieldSubscriptionTier]
+	return ok
+}
+
+// ResetSubscriptionTier resets all changes to the "subscription_tier" field.
+func (m *BeePlatformMutation) ResetSubscriptionTier() {
+	m.subscription_tier = nil
+	delete(m.clearedFields, beeplatform.FieldSubscriptionTier)
+}
+
+// SetConcurrency sets the "concurrency" field.
+func (m *BeePlatformMutation) SetConcurrency(i int) {
+	m.concurrency = &i
+	m.addconcurrency = nil
+}
+
+// Concurrency returns the value of the "concurrency" field in the mutation.
+func (m *BeePlatformMutation) Concurrency() (r int, exists bool) {
+	v := m.concurrency
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConcurrency returns the old "concurrency" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldConcurrency(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConcurrency is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConcurrency requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConcurrency: %w", err)
+	}
+	return oldValue.Concurrency, nil
+}
+
+// AddConcurrency adds i to the "concurrency" field.
+func (m *BeePlatformMutation) AddConcurrency(i int) {
+	if m.addconcurrency != nil {
+		*m.addconcurrency += i
+	} else {
+		m.addconcurrency = &i
+	}
+}
+
+// AddedConcurrency returns the value that was added to the "concurrency" field in this mutation.
+func (m *BeePlatformMutation) AddedConcurrency() (r int, exists bool) {
+	v := m.addconcurrency
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetConcurrency resets all changes to the "concurrency" field.
+func (m *BeePlatformMutation) ResetConcurrency() {
+	m.concurrency = nil
+	m.addconcurrency = nil
+}
+
+// SetQuotaSnapshot sets the "quota_snapshot" field.
+func (m *BeePlatformMutation) SetQuotaSnapshot(value map[string]interface{}) {
+	m.quota_snapshot = &value
+}
+
+// QuotaSnapshot returns the value of the "quota_snapshot" field in the mutation.
+func (m *BeePlatformMutation) QuotaSnapshot() (r map[string]interface{}, exists bool) {
+	v := m.quota_snapshot
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaSnapshot returns the old "quota_snapshot" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldQuotaSnapshot(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaSnapshot is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaSnapshot requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaSnapshot: %w", err)
+	}
+	return oldValue.QuotaSnapshot, nil
+}
+
+// ResetQuotaSnapshot resets all changes to the "quota_snapshot" field.
+func (m *BeePlatformMutation) ResetQuotaSnapshot() {
+	m.quota_snapshot = nil
+}
+
+// SetQuotaUpdatedAt sets the "quota_updated_at" field.
+func (m *BeePlatformMutation) SetQuotaUpdatedAt(t time.Time) {
+	m.quota_updated_at = &t
+}
+
+// QuotaUpdatedAt returns the value of the "quota_updated_at" field in the mutation.
+func (m *BeePlatformMutation) QuotaUpdatedAt() (r time.Time, exists bool) {
+	v := m.quota_updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaUpdatedAt returns the old "quota_updated_at" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldQuotaUpdatedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaUpdatedAt: %w", err)
+	}
+	return oldValue.QuotaUpdatedAt, nil
+}
+
+// ClearQuotaUpdatedAt clears the value of the "quota_updated_at" field.
+func (m *BeePlatformMutation) ClearQuotaUpdatedAt() {
+	m.quota_updated_at = nil
+	m.clearedFields[beeplatform.FieldQuotaUpdatedAt] = struct{}{}
+}
+
+// QuotaUpdatedAtCleared returns if the "quota_updated_at" field was cleared in this mutation.
+func (m *BeePlatformMutation) QuotaUpdatedAtCleared() bool {
+	_, ok := m.clearedFields[beeplatform.FieldQuotaUpdatedAt]
+	return ok
+}
+
+// ResetQuotaUpdatedAt resets all changes to the "quota_updated_at" field.
+func (m *BeePlatformMutation) ResetQuotaUpdatedAt() {
+	m.quota_updated_at = nil
+	delete(m.clearedFields, beeplatform.FieldQuotaUpdatedAt)
+}
+
+// SetLastTaskAt sets the "last_task_at" field.
+func (m *BeePlatformMutation) SetLastTaskAt(t time.Time) {
+	m.last_task_at = &t
+}
+
+// LastTaskAt returns the value of the "last_task_at" field in the mutation.
+func (m *BeePlatformMutation) LastTaskAt() (r time.Time, exists bool) {
+	v := m.last_task_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastTaskAt returns the old "last_task_at" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldLastTaskAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastTaskAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastTaskAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastTaskAt: %w", err)
+	}
+	return oldValue.LastTaskAt, nil
+}
+
+// ClearLastTaskAt clears the value of the "last_task_at" field.
+func (m *BeePlatformMutation) ClearLastTaskAt() {
+	m.last_task_at = nil
+	m.clearedFields[beeplatform.FieldLastTaskAt] = struct{}{}
+}
+
+// LastTaskAtCleared returns if the "last_task_at" field was cleared in this mutation.
+func (m *BeePlatformMutation) LastTaskAtCleared() bool {
+	_, ok := m.clearedFields[beeplatform.FieldLastTaskAt]
+	return ok
+}
+
+// ResetLastTaskAt resets all changes to the "last_task_at" field.
+func (m *BeePlatformMutation) ResetLastTaskAt() {
+	m.last_task_at = nil
+	delete(m.clearedFields, beeplatform.FieldLastTaskAt)
+}
+
+// SetStatus sets the "status" field.
+func (m *BeePlatformMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *BeePlatformMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *BeePlatformMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetExtra sets the "extra" field.
+func (m *BeePlatformMutation) SetExtra(value map[string]interface{}) {
+	m.extra = &value
+}
+
+// Extra returns the value of the "extra" field in the mutation.
+func (m *BeePlatformMutation) Extra() (r map[string]interface{}, exists bool) {
+	v := m.extra
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExtra returns the old "extra" field's value of the BeePlatform entity.
+// If the BeePlatform object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *BeePlatformMutation) OldExtra(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExtra is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExtra requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExtra: %w", err)
+	}
+	return oldValue.Extra, nil
+}
+
+// ResetExtra resets all changes to the "extra" field.
+func (m *BeePlatformMutation) ResetExtra() {
+	m.extra = nil
+}
+
+// ClearBee clears the "bee" edge to the Bee entity.
+func (m *BeePlatformMutation) ClearBee() {
+	m.clearedbee = true
+	m.clearedFields[beeplatform.FieldBeeID] = struct{}{}
+}
+
+// BeeCleared reports if the "bee" edge to the Bee entity was cleared.
+func (m *BeePlatformMutation) BeeCleared() bool {
+	return m.clearedbee
+}
+
+// BeeIDs returns the "bee" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// BeeID instead. It exists only for internal usage by the builders.
+func (m *BeePlatformMutation) BeeIDs() (ids []int64) {
+	if id := m.bee; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetBee resets all changes to the "bee" edge.
+func (m *BeePlatformMutation) ResetBee() {
+	m.bee = nil
+	m.clearedbee = false
+}
+
+// Where appends a list predicates to the BeePlatformMutation builder.
+func (m *BeePlatformMutation) Where(ps ...predicate.BeePlatform) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the BeePlatformMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *BeePlatformMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.BeePlatform, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *BeePlatformMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *BeePlatformMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (BeePlatform).
+func (m *BeePlatformMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *BeePlatformMutation) Fields() []string {
+	fields := make([]string, 0, 14)
+	if m.created_at != nil {
+		fields = append(fields, beeplatform.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, beeplatform.FieldUpdatedAt)
+	}
+	if m.deleted_at != nil {
+		fields = append(fields, beeplatform.FieldDeletedAt)
+	}
+	if m.bee != nil {
+		fields = append(fields, beeplatform.FieldBeeID)
+	}
+	if m.platform != nil {
+		fields = append(fields, beeplatform.FieldPlatform)
+	}
+	if m.upstream_account_key != nil {
+		fields = append(fields, beeplatform.FieldUpstreamAccountKey)
+	}
+	if m.identity_version != nil {
+		fields = append(fields, beeplatform.FieldIdentityVersion)
+	}
+	if m.subscription_tier != nil {
+		fields = append(fields, beeplatform.FieldSubscriptionTier)
+	}
+	if m.concurrency != nil {
+		fields = append(fields, beeplatform.FieldConcurrency)
+	}
+	if m.quota_snapshot != nil {
+		fields = append(fields, beeplatform.FieldQuotaSnapshot)
+	}
+	if m.quota_updated_at != nil {
+		fields = append(fields, beeplatform.FieldQuotaUpdatedAt)
+	}
+	if m.last_task_at != nil {
+		fields = append(fields, beeplatform.FieldLastTaskAt)
+	}
+	if m.status != nil {
+		fields = append(fields, beeplatform.FieldStatus)
+	}
+	if m.extra != nil {
+		fields = append(fields, beeplatform.FieldExtra)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *BeePlatformMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case beeplatform.FieldCreatedAt:
+		return m.CreatedAt()
+	case beeplatform.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case beeplatform.FieldDeletedAt:
+		return m.DeletedAt()
+	case beeplatform.FieldBeeID:
+		return m.BeeID()
+	case beeplatform.FieldPlatform:
+		return m.Platform()
+	case beeplatform.FieldUpstreamAccountKey:
+		return m.UpstreamAccountKey()
+	case beeplatform.FieldIdentityVersion:
+		return m.IdentityVersion()
+	case beeplatform.FieldSubscriptionTier:
+		return m.SubscriptionTier()
+	case beeplatform.FieldConcurrency:
+		return m.Concurrency()
+	case beeplatform.FieldQuotaSnapshot:
+		return m.QuotaSnapshot()
+	case beeplatform.FieldQuotaUpdatedAt:
+		return m.QuotaUpdatedAt()
+	case beeplatform.FieldLastTaskAt:
+		return m.LastTaskAt()
+	case beeplatform.FieldStatus:
+		return m.Status()
+	case beeplatform.FieldExtra:
+		return m.Extra()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *BeePlatformMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case beeplatform.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case beeplatform.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case beeplatform.FieldDeletedAt:
+		return m.OldDeletedAt(ctx)
+	case beeplatform.FieldBeeID:
+		return m.OldBeeID(ctx)
+	case beeplatform.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case beeplatform.FieldUpstreamAccountKey:
+		return m.OldUpstreamAccountKey(ctx)
+	case beeplatform.FieldIdentityVersion:
+		return m.OldIdentityVersion(ctx)
+	case beeplatform.FieldSubscriptionTier:
+		return m.OldSubscriptionTier(ctx)
+	case beeplatform.FieldConcurrency:
+		return m.OldConcurrency(ctx)
+	case beeplatform.FieldQuotaSnapshot:
+		return m.OldQuotaSnapshot(ctx)
+	case beeplatform.FieldQuotaUpdatedAt:
+		return m.OldQuotaUpdatedAt(ctx)
+	case beeplatform.FieldLastTaskAt:
+		return m.OldLastTaskAt(ctx)
+	case beeplatform.FieldStatus:
+		return m.OldStatus(ctx)
+	case beeplatform.FieldExtra:
+		return m.OldExtra(ctx)
+	}
+	return nil, fmt.Errorf("unknown BeePlatform field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *BeePlatformMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case beeplatform.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case beeplatform.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case beeplatform.FieldDeletedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeletedAt(v)
+		return nil
+	case beeplatform.FieldBeeID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBeeID(v)
+		return nil
+	case beeplatform.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case beeplatform.FieldUpstreamAccountKey:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpstreamAccountKey(v)
+		return nil
+	case beeplatform.FieldIdentityVersion:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetIdentityVersion(v)
+		return nil
+	case beeplatform.FieldSubscriptionTier:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSubscriptionTier(v)
+		return nil
+	case beeplatform.FieldConcurrency:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConcurrency(v)
+		return nil
+	case beeplatform.FieldQuotaSnapshot:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaSnapshot(v)
+		return nil
+	case beeplatform.FieldQuotaUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaUpdatedAt(v)
+		return nil
+	case beeplatform.FieldLastTaskAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastTaskAt(v)
+		return nil
+	case beeplatform.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case beeplatform.FieldExtra:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExtra(v)
+		return nil
+	}
+	return fmt.Errorf("unknown BeePlatform field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *BeePlatformMutation) AddedFields() []string {
+	var fields []string
+	if m.addidentity_version != nil {
+		fields = append(fields, beeplatform.FieldIdentityVersion)
+	}
+	if m.addconcurrency != nil {
+		fields = append(fields, beeplatform.FieldConcurrency)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *BeePlatformMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case beeplatform.FieldIdentityVersion:
+		return m.AddedIdentityVersion()
+	case beeplatform.FieldConcurrency:
+		return m.AddedConcurrency()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *BeePlatformMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case beeplatform.FieldIdentityVersion:
+		v, ok := value.(int16)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddIdentityVersion(v)
+		return nil
+	case beeplatform.FieldConcurrency:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddConcurrency(v)
+		return nil
+	}
+	return fmt.Errorf("unknown BeePlatform numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *BeePlatformMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(beeplatform.FieldDeletedAt) {
+		fields = append(fields, beeplatform.FieldDeletedAt)
+	}
+	if m.FieldCleared(beeplatform.FieldSubscriptionTier) {
+		fields = append(fields, beeplatform.FieldSubscriptionTier)
+	}
+	if m.FieldCleared(beeplatform.FieldQuotaUpdatedAt) {
+		fields = append(fields, beeplatform.FieldQuotaUpdatedAt)
+	}
+	if m.FieldCleared(beeplatform.FieldLastTaskAt) {
+		fields = append(fields, beeplatform.FieldLastTaskAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *BeePlatformMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *BeePlatformMutation) ClearField(name string) error {
+	switch name {
+	case beeplatform.FieldDeletedAt:
+		m.ClearDeletedAt()
+		return nil
+	case beeplatform.FieldSubscriptionTier:
+		m.ClearSubscriptionTier()
+		return nil
+	case beeplatform.FieldQuotaUpdatedAt:
+		m.ClearQuotaUpdatedAt()
+		return nil
+	case beeplatform.FieldLastTaskAt:
+		m.ClearLastTaskAt()
+		return nil
+	}
+	return fmt.Errorf("unknown BeePlatform nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *BeePlatformMutation) ResetField(name string) error {
+	switch name {
+	case beeplatform.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case beeplatform.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case beeplatform.FieldDeletedAt:
+		m.ResetDeletedAt()
+		return nil
+	case beeplatform.FieldBeeID:
+		m.ResetBeeID()
+		return nil
+	case beeplatform.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case beeplatform.FieldUpstreamAccountKey:
+		m.ResetUpstreamAccountKey()
+		return nil
+	case beeplatform.FieldIdentityVersion:
+		m.ResetIdentityVersion()
+		return nil
+	case beeplatform.FieldSubscriptionTier:
+		m.ResetSubscriptionTier()
+		return nil
+	case beeplatform.FieldConcurrency:
+		m.ResetConcurrency()
+		return nil
+	case beeplatform.FieldQuotaSnapshot:
+		m.ResetQuotaSnapshot()
+		return nil
+	case beeplatform.FieldQuotaUpdatedAt:
+		m.ResetQuotaUpdatedAt()
+		return nil
+	case beeplatform.FieldLastTaskAt:
+		m.ResetLastTaskAt()
+		return nil
+	case beeplatform.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case beeplatform.FieldExtra:
+		m.ResetExtra()
+		return nil
+	}
+	return fmt.Errorf("unknown BeePlatform field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *BeePlatformMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.bee != nil {
+		edges = append(edges, beeplatform.EdgeBee)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *BeePlatformMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case beeplatform.EdgeBee:
+		if id := m.bee; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *BeePlatformMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *BeePlatformMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *BeePlatformMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.clearedbee {
+		edges = append(edges, beeplatform.EdgeBee)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *BeePlatformMutation) EdgeCleared(name string) bool {
+	switch name {
+	case beeplatform.EdgeBee:
+		return m.clearedbee
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *BeePlatformMutation) ClearEdge(name string) error {
+	switch name {
+	case beeplatform.EdgeBee:
+		m.ClearBee()
+		return nil
+	}
+	return fmt.Errorf("unknown BeePlatform unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *BeePlatformMutation) ResetEdge(name string) error {
+	switch name {
+	case beeplatform.EdgeBee:
+		m.ResetBee()
+		return nil
+	}
+	return fmt.Errorf("unknown BeePlatform edge %s", name)
 }
 
 // ChannelMonitorMutation represents an operation that mutates the ChannelMonitor nodes in the graph.
@@ -47218,6 +49667,9 @@ type UserMutation struct {
 	platform_quotas               map[int64]struct{}
 	removedplatform_quotas        map[int64]struct{}
 	clearedplatform_quotas        bool
+	bees                          map[int64]struct{}
+	removedbees                   map[int64]struct{}
+	clearedbees                   bool
 	done                          bool
 	oldValue                      func(context.Context) (*User, error)
 	predicates                    []predicate.User
@@ -49086,6 +51538,60 @@ func (m *UserMutation) ResetPlatformQuotas() {
 	m.removedplatform_quotas = nil
 }
 
+// AddBeeIDs adds the "bees" edge to the Bee entity by ids.
+func (m *UserMutation) AddBeeIDs(ids ...int64) {
+	if m.bees == nil {
+		m.bees = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.bees[ids[i]] = struct{}{}
+	}
+}
+
+// ClearBees clears the "bees" edge to the Bee entity.
+func (m *UserMutation) ClearBees() {
+	m.clearedbees = true
+}
+
+// BeesCleared reports if the "bees" edge to the Bee entity was cleared.
+func (m *UserMutation) BeesCleared() bool {
+	return m.clearedbees
+}
+
+// RemoveBeeIDs removes the "bees" edge to the Bee entity by IDs.
+func (m *UserMutation) RemoveBeeIDs(ids ...int64) {
+	if m.removedbees == nil {
+		m.removedbees = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.bees, ids[i])
+		m.removedbees[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedBees returns the removed IDs of the "bees" edge to the Bee entity.
+func (m *UserMutation) RemovedBeesIDs() (ids []int64) {
+	for id := range m.removedbees {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// BeesIDs returns the "bees" edge IDs in the mutation.
+func (m *UserMutation) BeesIDs() (ids []int64) {
+	for id := range m.bees {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetBees resets all changes to the "bees" edge.
+func (m *UserMutation) ResetBees() {
+	m.bees = nil
+	m.clearedbees = false
+	m.removedbees = nil
+}
+
 // Where appends a list predicates to the UserMutation builder.
 func (m *UserMutation) Where(ps ...predicate.User) {
 	m.predicates = append(m.predicates, ps...)
@@ -49724,7 +52230,7 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 13)
+	edges := make([]string, 0, 14)
 	if m.api_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -49763,6 +52269,9 @@ func (m *UserMutation) AddedEdges() []string {
 	}
 	if m.platform_quotas != nil {
 		edges = append(edges, user.EdgePlatformQuotas)
+	}
+	if m.bees != nil {
+		edges = append(edges, user.EdgeBees)
 	}
 	return edges
 }
@@ -49849,13 +52358,19 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeBees:
+		ids := make([]ent.Value, 0, len(m.bees))
+		for id := range m.bees {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 13)
+	edges := make([]string, 0, 14)
 	if m.removedapi_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -49894,6 +52409,9 @@ func (m *UserMutation) RemovedEdges() []string {
 	}
 	if m.removedplatform_quotas != nil {
 		edges = append(edges, user.EdgePlatformQuotas)
+	}
+	if m.removedbees != nil {
+		edges = append(edges, user.EdgeBees)
 	}
 	return edges
 }
@@ -49980,13 +52498,19 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeBees:
+		ids := make([]ent.Value, 0, len(m.removedbees))
+		for id := range m.removedbees {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 13)
+	edges := make([]string, 0, 14)
 	if m.clearedapi_keys {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -50026,6 +52550,9 @@ func (m *UserMutation) ClearedEdges() []string {
 	if m.clearedplatform_quotas {
 		edges = append(edges, user.EdgePlatformQuotas)
 	}
+	if m.clearedbees {
+		edges = append(edges, user.EdgeBees)
+	}
 	return edges
 }
 
@@ -50059,6 +52586,8 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 		return m.clearedpending_auth_sessions
 	case user.EdgePlatformQuotas:
 		return m.clearedplatform_quotas
+	case user.EdgeBees:
+		return m.clearedbees
 	}
 	return false
 }
@@ -50113,6 +52642,9 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgePlatformQuotas:
 		m.ResetPlatformQuotas()
+		return nil
+	case user.EdgeBees:
+		m.ResetBees()
 		return nil
 	}
 	return fmt.Errorf("unknown User edge %s", name)

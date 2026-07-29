@@ -129,6 +129,30 @@ func (f BatchImageJobFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Valu
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.BatchImageJobMutation", m)
 }
 
+// The BeeFunc type is an adapter to allow the use of ordinary
+// function as Bee mutator.
+type BeeFunc func(context.Context, *ent.BeeMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f BeeFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.BeeMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.BeeMutation", m)
+}
+
+// The BeePlatformFunc type is an adapter to allow the use of ordinary
+// function as BeePlatform mutator.
+type BeePlatformFunc func(context.Context, *ent.BeePlatformMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f BeePlatformFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.BeePlatformMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.BeePlatformMutation", m)
+}
+
 // The ChannelMonitorFunc type is an adapter to allow the use of ordinary
 // function as ChannelMonitor mutator.
 type ChannelMonitorFunc func(context.Context, *ent.ChannelMonitorMutation) (ent.Value, error)

@@ -25,6 +25,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/batchimageevent"
 	"github.com/Wei-Shaw/sub2api/ent/batchimageitem"
 	"github.com/Wei-Shaw/sub2api/ent/batchimagejob"
+	"github.com/Wei-Shaw/sub2api/ent/bee"
+	"github.com/Wei-Shaw/sub2api/ent/beeplatform"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
@@ -83,6 +85,10 @@ type Client struct {
 	BatchImageItem *BatchImageItemClient
 	// BatchImageJob is the client for interacting with the BatchImageJob builders.
 	BatchImageJob *BatchImageJobClient
+	// Bee is the client for interacting with the Bee builders.
+	Bee *BeeClient
+	// BeePlatform is the client for interacting with the BeePlatform builders.
+	BeePlatform *BeePlatformClient
 	// ChannelMonitor is the client for interacting with the ChannelMonitor builders.
 	ChannelMonitor *ChannelMonitorClient
 	// ChannelMonitorDailyRollup is the client for interacting with the ChannelMonitorDailyRollup builders.
@@ -162,6 +168,8 @@ func (c *Client) init() {
 	c.BatchImageEvent = NewBatchImageEventClient(c.config)
 	c.BatchImageItem = NewBatchImageItemClient(c.config)
 	c.BatchImageJob = NewBatchImageJobClient(c.config)
+	c.Bee = NewBeeClient(c.config)
+	c.BeePlatform = NewBeePlatformClient(c.config)
 	c.ChannelMonitor = NewChannelMonitorClient(c.config)
 	c.ChannelMonitorDailyRollup = NewChannelMonitorDailyRollupClient(c.config)
 	c.ChannelMonitorHistory = NewChannelMonitorHistoryClient(c.config)
@@ -293,6 +301,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		BatchImageEvent:               NewBatchImageEventClient(cfg),
 		BatchImageItem:                NewBatchImageItemClient(cfg),
 		BatchImageJob:                 NewBatchImageJobClient(cfg),
+		Bee:                           NewBeeClient(cfg),
+		BeePlatform:                   NewBeePlatformClient(cfg),
 		ChannelMonitor:                NewChannelMonitorClient(cfg),
 		ChannelMonitorDailyRollup:     NewChannelMonitorDailyRollupClient(cfg),
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
@@ -351,6 +361,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		BatchImageEvent:               NewBatchImageEventClient(cfg),
 		BatchImageItem:                NewBatchImageItemClient(cfg),
 		BatchImageJob:                 NewBatchImageJobClient(cfg),
+		Bee:                           NewBeeClient(cfg),
+		BeePlatform:                   NewBeePlatformClient(cfg),
 		ChannelMonitor:                NewChannelMonitorClient(cfg),
 		ChannelMonitorDailyRollup:     NewChannelMonitorDailyRollupClient(cfg),
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
@@ -411,14 +423,14 @@ func (c *Client) Use(hooks ...Hook) {
 	for _, n := range []interface{ Use(...Hook) }{
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
-		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
-		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.BatchImageJob, c.Bee, c.BeePlatform, c.ChannelMonitor,
+		c.ChannelMonitorDailyRollup, c.ChannelMonitorHistory,
+		c.ChannelMonitorRequestTemplate, c.CompositeModelRoute, c.ErrorPassthroughRule,
+		c.Group, c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Use(hooks...)
@@ -431,14 +443,14 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 	for _, n := range []interface{ Intercept(...Interceptor) }{
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
-		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
-		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.CompositeModelRoute, c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
-		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
-		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.BatchImageJob, c.Bee, c.BeePlatform, c.ChannelMonitor,
+		c.ChannelMonitorDailyRollup, c.ChannelMonitorHistory,
+		c.ChannelMonitorRequestTemplate, c.CompositeModelRoute, c.ErrorPassthroughRule,
+		c.Group, c.IdempotencyRecord, c.IdentityAdoptionDecision, c.PaymentAuditLog,
+		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
+		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
+		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
@@ -468,6 +480,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.BatchImageItem.mutate(ctx, m)
 	case *BatchImageJobMutation:
 		return c.BatchImageJob.mutate(ctx, m)
+	case *BeeMutation:
+		return c.Bee.mutate(ctx, m)
+	case *BeePlatformMutation:
+		return c.BeePlatform.mutate(ctx, m)
 	case *ChannelMonitorMutation:
 		return c.ChannelMonitor.mutate(ctx, m)
 	case *ChannelMonitorDailyRollupMutation:
@@ -2101,6 +2117,324 @@ func (c *BatchImageJobClient) mutate(ctx context.Context, m *BatchImageJobMutati
 		return (&BatchImageJobDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown BatchImageJob mutation op: %q", m.Op())
+	}
+}
+
+// BeeClient is a client for the Bee schema.
+type BeeClient struct {
+	config
+}
+
+// NewBeeClient returns a client for the Bee from the given config.
+func NewBeeClient(c config) *BeeClient {
+	return &BeeClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `bee.Hooks(f(g(h())))`.
+func (c *BeeClient) Use(hooks ...Hook) {
+	c.hooks.Bee = append(c.hooks.Bee, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `bee.Intercept(f(g(h())))`.
+func (c *BeeClient) Intercept(interceptors ...Interceptor) {
+	c.inters.Bee = append(c.inters.Bee, interceptors...)
+}
+
+// Create returns a builder for creating a Bee entity.
+func (c *BeeClient) Create() *BeeCreate {
+	mutation := newBeeMutation(c.config, OpCreate)
+	return &BeeCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of Bee entities.
+func (c *BeeClient) CreateBulk(builders ...*BeeCreate) *BeeCreateBulk {
+	return &BeeCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *BeeClient) MapCreateBulk(slice any, setFunc func(*BeeCreate, int)) *BeeCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &BeeCreateBulk{err: fmt.Errorf("calling to BeeClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*BeeCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &BeeCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for Bee.
+func (c *BeeClient) Update() *BeeUpdate {
+	mutation := newBeeMutation(c.config, OpUpdate)
+	return &BeeUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *BeeClient) UpdateOne(_m *Bee) *BeeUpdateOne {
+	mutation := newBeeMutation(c.config, OpUpdateOne, withBee(_m))
+	return &BeeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *BeeClient) UpdateOneID(id int64) *BeeUpdateOne {
+	mutation := newBeeMutation(c.config, OpUpdateOne, withBeeID(id))
+	return &BeeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for Bee.
+func (c *BeeClient) Delete() *BeeDelete {
+	mutation := newBeeMutation(c.config, OpDelete)
+	return &BeeDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *BeeClient) DeleteOne(_m *Bee) *BeeDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *BeeClient) DeleteOneID(id int64) *BeeDeleteOne {
+	builder := c.Delete().Where(bee.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &BeeDeleteOne{builder}
+}
+
+// Query returns a query builder for Bee.
+func (c *BeeClient) Query() *BeeQuery {
+	return &BeeQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeBee},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a Bee entity by its id.
+func (c *BeeClient) Get(ctx context.Context, id int64) (*Bee, error) {
+	return c.Query().Where(bee.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *BeeClient) GetX(ctx context.Context, id int64) *Bee {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a Bee.
+func (c *BeeClient) QueryUser(_m *Bee) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(bee.Table, bee.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, bee.UserTable, bee.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryPlatforms queries the platforms edge of a Bee.
+func (c *BeeClient) QueryPlatforms(_m *Bee) *BeePlatformQuery {
+	query := (&BeePlatformClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(bee.Table, bee.FieldID, id),
+			sqlgraph.To(beeplatform.Table, beeplatform.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, bee.PlatformsTable, bee.PlatformsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *BeeClient) Hooks() []Hook {
+	hooks := c.hooks.Bee
+	return append(hooks[:len(hooks):len(hooks)], bee.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *BeeClient) Interceptors() []Interceptor {
+	inters := c.inters.Bee
+	return append(inters[:len(inters):len(inters)], bee.Interceptors[:]...)
+}
+
+func (c *BeeClient) mutate(ctx context.Context, m *BeeMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&BeeCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&BeeUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&BeeUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&BeeDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown Bee mutation op: %q", m.Op())
+	}
+}
+
+// BeePlatformClient is a client for the BeePlatform schema.
+type BeePlatformClient struct {
+	config
+}
+
+// NewBeePlatformClient returns a client for the BeePlatform from the given config.
+func NewBeePlatformClient(c config) *BeePlatformClient {
+	return &BeePlatformClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `beeplatform.Hooks(f(g(h())))`.
+func (c *BeePlatformClient) Use(hooks ...Hook) {
+	c.hooks.BeePlatform = append(c.hooks.BeePlatform, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `beeplatform.Intercept(f(g(h())))`.
+func (c *BeePlatformClient) Intercept(interceptors ...Interceptor) {
+	c.inters.BeePlatform = append(c.inters.BeePlatform, interceptors...)
+}
+
+// Create returns a builder for creating a BeePlatform entity.
+func (c *BeePlatformClient) Create() *BeePlatformCreate {
+	mutation := newBeePlatformMutation(c.config, OpCreate)
+	return &BeePlatformCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of BeePlatform entities.
+func (c *BeePlatformClient) CreateBulk(builders ...*BeePlatformCreate) *BeePlatformCreateBulk {
+	return &BeePlatformCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *BeePlatformClient) MapCreateBulk(slice any, setFunc func(*BeePlatformCreate, int)) *BeePlatformCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &BeePlatformCreateBulk{err: fmt.Errorf("calling to BeePlatformClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*BeePlatformCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &BeePlatformCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for BeePlatform.
+func (c *BeePlatformClient) Update() *BeePlatformUpdate {
+	mutation := newBeePlatformMutation(c.config, OpUpdate)
+	return &BeePlatformUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *BeePlatformClient) UpdateOne(_m *BeePlatform) *BeePlatformUpdateOne {
+	mutation := newBeePlatformMutation(c.config, OpUpdateOne, withBeePlatform(_m))
+	return &BeePlatformUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *BeePlatformClient) UpdateOneID(id int64) *BeePlatformUpdateOne {
+	mutation := newBeePlatformMutation(c.config, OpUpdateOne, withBeePlatformID(id))
+	return &BeePlatformUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for BeePlatform.
+func (c *BeePlatformClient) Delete() *BeePlatformDelete {
+	mutation := newBeePlatformMutation(c.config, OpDelete)
+	return &BeePlatformDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *BeePlatformClient) DeleteOne(_m *BeePlatform) *BeePlatformDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *BeePlatformClient) DeleteOneID(id int64) *BeePlatformDeleteOne {
+	builder := c.Delete().Where(beeplatform.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &BeePlatformDeleteOne{builder}
+}
+
+// Query returns a query builder for BeePlatform.
+func (c *BeePlatformClient) Query() *BeePlatformQuery {
+	return &BeePlatformQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeBeePlatform},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a BeePlatform entity by its id.
+func (c *BeePlatformClient) Get(ctx context.Context, id int64) (*BeePlatform, error) {
+	return c.Query().Where(beeplatform.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *BeePlatformClient) GetX(ctx context.Context, id int64) *BeePlatform {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryBee queries the bee edge of a BeePlatform.
+func (c *BeePlatformClient) QueryBee(_m *BeePlatform) *BeeQuery {
+	query := (&BeeClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(beeplatform.Table, beeplatform.FieldID, id),
+			sqlgraph.To(bee.Table, bee.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, beeplatform.BeeTable, beeplatform.BeeColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *BeePlatformClient) Hooks() []Hook {
+	hooks := c.hooks.BeePlatform
+	return append(hooks[:len(hooks):len(hooks)], beeplatform.Hooks[:]...)
+}
+
+// Interceptors returns the client interceptors.
+func (c *BeePlatformClient) Interceptors() []Interceptor {
+	inters := c.inters.BeePlatform
+	return append(inters[:len(inters):len(inters)], beeplatform.Interceptors[:]...)
+}
+
+func (c *BeePlatformClient) mutate(ctx context.Context, m *BeePlatformMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&BeePlatformCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&BeePlatformUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&BeePlatformUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&BeePlatformDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown BeePlatform mutation op: %q", m.Op())
 	}
 }
 
@@ -5997,6 +6331,22 @@ func (c *UserClient) QueryPlatformQuotas(_m *User) *UserPlatformQuotaQuery {
 	return query
 }
 
+// QueryBees queries the bees edge of a User.
+func (c *UserClient) QueryBees(_m *User) *BeeQuery {
+	query := (&BeeClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(bee.Table, bee.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.BeesTable, user.BeesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryUserAllowedGroups queries the user_allowed_groups edge of a User.
 func (c *UserClient) QueryUserAllowedGroups(_m *User) *UserAllowedGroupQuery {
 	query := (&UserAllowedGroupClient{config: c.config}).Query()
@@ -6826,27 +7176,27 @@ func (c *UserSubscriptionClient) mutate(ctx context.Context, m *UserSubscription
 type (
 	hooks struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
-		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
-		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute,
-		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Hook
+		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob, Bee,
+		BeePlatform, ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
+		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
+		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
+		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
+		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
+		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
+		UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
-		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
-		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute,
-		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
-		UserPlatformQuota, UserSubscription []ent.Interceptor
+		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob, Bee,
+		BeePlatform, ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
+		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
+		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
+		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
+		TLSFingerprintProfile, UsageCleanupTask, UsageLog, User, UserAllowedGroup,
+		UserAttributeDefinition, UserAttributeValue, UserPlatformQuota,
+		UserSubscription []ent.Interceptor
 	}
 )
 

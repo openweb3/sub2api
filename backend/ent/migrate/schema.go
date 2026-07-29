@@ -617,6 +617,124 @@ var (
 			},
 		},
 	}
+	// BeeColumns holds the columns for the "bee" table.
+	BeeColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "device_id", Type: field.TypeUUID, Unique: true},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "status", Type: field.TypeString, Size: 20},
+		{Name: "credential_hash", Type: field.TypeString},
+		{Name: "credential_created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "app_version", Type: field.TypeString, Nullable: true, Size: 50},
+		{Name: "last_connected_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_disconnected_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_seen_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// BeeTable holds the schema information for the "bee" table.
+	BeeTable = &schema.Table{
+		Name:       "bee",
+		Columns:    BeeColumns,
+		PrimaryKey: []*schema.Column{BeeColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "bee_users_bees",
+				Columns:    []*schema.Column{BeeColumns[13]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "bee_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{BeeColumns[13]},
+			},
+			{
+				Name:    "bee_status",
+				Unique:  false,
+				Columns: []*schema.Column{BeeColumns[6]},
+			},
+			{
+				Name:    "bee_deleted_at",
+				Unique:  false,
+				Columns: []*schema.Column{BeeColumns[3]},
+			},
+		},
+	}
+	// BeePlatformColumns holds the columns for the "bee_platform" table.
+	BeePlatformColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "deleted_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "platform", Type: field.TypeString, Size: 50},
+		{Name: "upstream_account_key", Type: field.TypeString, Size: 64},
+		{Name: "identity_version", Type: field.TypeInt16, Default: 1},
+		{Name: "subscription_tier", Type: field.TypeString, Nullable: true, Size: 50},
+		{Name: "concurrency", Type: field.TypeInt},
+		{Name: "quota_snapshot", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "quota_updated_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_task_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "status", Type: field.TypeString, Size: 20},
+		{Name: "extra", Type: field.TypeJSON, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "bee_id", Type: field.TypeInt64},
+	}
+	// BeePlatformTable holds the schema information for the "bee_platform" table.
+	BeePlatformTable = &schema.Table{
+		Name:       "bee_platform",
+		Columns:    BeePlatformColumns,
+		PrimaryKey: []*schema.Column{BeePlatformColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "bee_platform_bee_platforms",
+				Columns:    []*schema.Column{BeePlatformColumns[14]},
+				RefColumns: []*schema.Column{BeeColumns[0]},
+				OnDelete:   schema.NoAction,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "beeplatform_bee_id",
+				Unique:  false,
+				Columns: []*schema.Column{BeePlatformColumns[14]},
+			},
+			{
+				Name:    "beeplatform_platform",
+				Unique:  false,
+				Columns: []*schema.Column{BeePlatformColumns[4]},
+			},
+			{
+				Name:    "beeplatform_status",
+				Unique:  false,
+				Columns: []*schema.Column{BeePlatformColumns[12]},
+			},
+			{
+				Name:    "beeplatform_deleted_at",
+				Unique:  false,
+				Columns: []*schema.Column{BeePlatformColumns[3]},
+			},
+			{
+				Name:    "beeplatform_bee_id_platform",
+				Unique:  true,
+				Columns: []*schema.Column{BeePlatformColumns[14], BeePlatformColumns[4]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deleted_at IS NULL",
+				},
+			},
+			{
+				Name:    "beeplatform_platform_upstream_account_key",
+				Unique:  true,
+				Columns: []*schema.Column{BeePlatformColumns[4], BeePlatformColumns[5]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "deleted_at IS NULL",
+				},
+			},
+		},
+	}
 	// ChannelMonitorsColumns holds the columns for the "channel_monitors" table.
 	ChannelMonitorsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2073,6 +2191,8 @@ var (
 		BatchImageEventsTable,
 		BatchImageItemsTable,
 		BatchImageJobsTable,
+		BeeTable,
+		BeePlatformTable,
 		ChannelMonitorsTable,
 		ChannelMonitorDailyRollupsTable,
 		ChannelMonitorHistoriesTable,
@@ -2145,6 +2265,14 @@ func init() {
 	}
 	BatchImageJobsTable.Annotation = &entsql.Annotation{
 		Table: "batch_image_jobs",
+	}
+	BeeTable.ForeignKeys[0].RefTable = UsersTable
+	BeeTable.Annotation = &entsql.Annotation{
+		Table: "bee",
+	}
+	BeePlatformTable.ForeignKeys[0].RefTable = BeeTable
+	BeePlatformTable.Annotation = &entsql.Annotation{
+		Table: "bee_platform",
 	}
 	ChannelMonitorsTable.ForeignKeys[0].RefTable = ChannelMonitorRequestTemplatesTable
 	ChannelMonitorsTable.Annotation = &entsql.Annotation{

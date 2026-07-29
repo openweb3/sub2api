@@ -15,6 +15,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/batchimageevent"
 	"github.com/Wei-Shaw/sub2api/ent/batchimageitem"
 	"github.com/Wei-Shaw/sub2api/ent/batchimagejob"
+	"github.com/Wei-Shaw/sub2api/ent/bee"
+	"github.com/Wei-Shaw/sub2api/ent/beeplatform"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitor"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
@@ -602,6 +604,166 @@ func init() {
 	batchimagejob.DefaultUpdatedAt = batchimagejobDescUpdatedAt.Default.(func() time.Time)
 	// batchimagejob.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
 	batchimagejob.UpdateDefaultUpdatedAt = batchimagejobDescUpdatedAt.UpdateDefault.(func() time.Time)
+	beeMixin := schema.Bee{}.Mixin()
+	beeMixinHooks1 := beeMixin[1].Hooks()
+	bee.Hooks[0] = beeMixinHooks1[0]
+	beeMixinInters1 := beeMixin[1].Interceptors()
+	bee.Interceptors[0] = beeMixinInters1[0]
+	beeMixinFields0 := beeMixin[0].Fields()
+	_ = beeMixinFields0
+	beeFields := schema.Bee{}.Fields()
+	_ = beeFields
+	// beeDescCreatedAt is the schema descriptor for created_at field.
+	beeDescCreatedAt := beeMixinFields0[0].Descriptor()
+	// bee.DefaultCreatedAt holds the default value on creation for the created_at field.
+	bee.DefaultCreatedAt = beeDescCreatedAt.Default.(func() time.Time)
+	// beeDescUpdatedAt is the schema descriptor for updated_at field.
+	beeDescUpdatedAt := beeMixinFields0[1].Descriptor()
+	// bee.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	bee.DefaultUpdatedAt = beeDescUpdatedAt.Default.(func() time.Time)
+	// bee.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	bee.UpdateDefaultUpdatedAt = beeDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// beeDescName is the schema descriptor for name field.
+	beeDescName := beeFields[2].Descriptor()
+	// bee.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	bee.NameValidator = func() func(string) error {
+		validators := beeDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// beeDescStatus is the schema descriptor for status field.
+	beeDescStatus := beeFields[3].Descriptor()
+	// bee.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	bee.StatusValidator = func() func(string) error {
+		validators := beeDescStatus.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(status string) error {
+			for _, fn := range fns {
+				if err := fn(status); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// beeDescCredentialHash is the schema descriptor for credential_hash field.
+	beeDescCredentialHash := beeFields[4].Descriptor()
+	// bee.CredentialHashValidator is a validator for the "credential_hash" field. It is called by the builders before save.
+	bee.CredentialHashValidator = beeDescCredentialHash.Validators[0].(func(string) error)
+	// beeDescAppVersion is the schema descriptor for app_version field.
+	beeDescAppVersion := beeFields[6].Descriptor()
+	// bee.AppVersionValidator is a validator for the "app_version" field. It is called by the builders before save.
+	bee.AppVersionValidator = beeDescAppVersion.Validators[0].(func(string) error)
+	beeplatformMixin := schema.BeePlatform{}.Mixin()
+	beeplatformMixinHooks1 := beeplatformMixin[1].Hooks()
+	beeplatform.Hooks[0] = beeplatformMixinHooks1[0]
+	beeplatformMixinInters1 := beeplatformMixin[1].Interceptors()
+	beeplatform.Interceptors[0] = beeplatformMixinInters1[0]
+	beeplatformMixinFields0 := beeplatformMixin[0].Fields()
+	_ = beeplatformMixinFields0
+	beeplatformFields := schema.BeePlatform{}.Fields()
+	_ = beeplatformFields
+	// beeplatformDescCreatedAt is the schema descriptor for created_at field.
+	beeplatformDescCreatedAt := beeplatformMixinFields0[0].Descriptor()
+	// beeplatform.DefaultCreatedAt holds the default value on creation for the created_at field.
+	beeplatform.DefaultCreatedAt = beeplatformDescCreatedAt.Default.(func() time.Time)
+	// beeplatformDescUpdatedAt is the schema descriptor for updated_at field.
+	beeplatformDescUpdatedAt := beeplatformMixinFields0[1].Descriptor()
+	// beeplatform.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	beeplatform.DefaultUpdatedAt = beeplatformDescUpdatedAt.Default.(func() time.Time)
+	// beeplatform.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	beeplatform.UpdateDefaultUpdatedAt = beeplatformDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// beeplatformDescPlatform is the schema descriptor for platform field.
+	beeplatformDescPlatform := beeplatformFields[1].Descriptor()
+	// beeplatform.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	beeplatform.PlatformValidator = func() func(string) error {
+		validators := beeplatformDescPlatform.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(platform string) error {
+			for _, fn := range fns {
+				if err := fn(platform); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// beeplatformDescUpstreamAccountKey is the schema descriptor for upstream_account_key field.
+	beeplatformDescUpstreamAccountKey := beeplatformFields[2].Descriptor()
+	// beeplatform.UpstreamAccountKeyValidator is a validator for the "upstream_account_key" field. It is called by the builders before save.
+	beeplatform.UpstreamAccountKeyValidator = func() func(string) error {
+		validators := beeplatformDescUpstreamAccountKey.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(upstream_account_key string) error {
+			for _, fn := range fns {
+				if err := fn(upstream_account_key); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// beeplatformDescIdentityVersion is the schema descriptor for identity_version field.
+	beeplatformDescIdentityVersion := beeplatformFields[3].Descriptor()
+	// beeplatform.DefaultIdentityVersion holds the default value on creation for the identity_version field.
+	beeplatform.DefaultIdentityVersion = beeplatformDescIdentityVersion.Default.(int16)
+	// beeplatformDescSubscriptionTier is the schema descriptor for subscription_tier field.
+	beeplatformDescSubscriptionTier := beeplatformFields[4].Descriptor()
+	// beeplatform.SubscriptionTierValidator is a validator for the "subscription_tier" field. It is called by the builders before save.
+	beeplatform.SubscriptionTierValidator = beeplatformDescSubscriptionTier.Validators[0].(func(string) error)
+	// beeplatformDescConcurrency is the schema descriptor for concurrency field.
+	beeplatformDescConcurrency := beeplatformFields[5].Descriptor()
+	// beeplatform.ConcurrencyValidator is a validator for the "concurrency" field. It is called by the builders before save.
+	beeplatform.ConcurrencyValidator = beeplatformDescConcurrency.Validators[0].(func(int) error)
+	// beeplatformDescQuotaSnapshot is the schema descriptor for quota_snapshot field.
+	beeplatformDescQuotaSnapshot := beeplatformFields[6].Descriptor()
+	// beeplatform.DefaultQuotaSnapshot holds the default value on creation for the quota_snapshot field.
+	beeplatform.DefaultQuotaSnapshot = beeplatformDescQuotaSnapshot.Default.(func() map[string]interface{})
+	// beeplatformDescStatus is the schema descriptor for status field.
+	beeplatformDescStatus := beeplatformFields[9].Descriptor()
+	// beeplatform.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	beeplatform.StatusValidator = func() func(string) error {
+		validators := beeplatformDescStatus.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+			validators[2].(func(string) error),
+		}
+		return func(status string) error {
+			for _, fn := range fns {
+				if err := fn(status); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// beeplatformDescExtra is the schema descriptor for extra field.
+	beeplatformDescExtra := beeplatformFields[10].Descriptor()
+	// beeplatform.DefaultExtra holds the default value on creation for the extra field.
+	beeplatform.DefaultExtra = beeplatformDescExtra.Default.(func() map[string]interface{})
 	channelmonitorMixin := schema.ChannelMonitor{}.Mixin()
 	channelmonitorMixinFields0 := channelmonitorMixin[0].Fields()
 	_ = channelmonitorMixinFields0
