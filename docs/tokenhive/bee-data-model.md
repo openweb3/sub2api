@@ -165,6 +165,7 @@ Bee B + OpenAI Account Z      允许
 - 其他 Bee 不能自动抢占该平台账号
 - 迁移平台账号时，必须先显式解绑原 BeePlatform
 - 解绑通过软删除原 BeePlatform 记录完成
+- Bee 存在未解绑的 BeePlatform 时不能删除，必须先显式解绑所有平台
 
 ### 4.2 upstream_account_key
 

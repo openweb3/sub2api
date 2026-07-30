@@ -24,6 +24,10 @@ var (
 		"BEE_DEVICE_ALREADY_REGISTERED",
 		"bee device is already registered",
 	)
+	ErrBeeHasPlatformBindings = infraerrors.Conflict(
+		"BEE_HAS_PLATFORM_BINDINGS",
+		"bee has platform bindings; unbind them before deleting the bee",
+	)
 	ErrBeePlatformNotFound      = infraerrors.NotFound("BEE_PLATFORM_NOT_FOUND", "bee platform not found")
 	ErrBeePlatformInputRequired = infraerrors.BadRequest(
 		"BEE_PLATFORM_INPUT_REQUIRED",

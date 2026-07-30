@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"fmt"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/bee"
+	"github.com/Wei-Shaw/sub2api/ent/beeplatform"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
 )
@@ -137,10 +139,57 @@ func (r *beeRepository) Update(ctx context.Context, userID int64, record *servic
 }
 
 func (r *beeRepository) Delete(ctx context.Context, userID, id int64) error {
-	err := clientFromContext(ctx, r.client).Bee.DeleteOneID(id).
-		Where(bee.UserIDEQ(userID)).
-		Exec(ctx)
-	return translatePersistenceError(err, service.ErrBeeNotFound, nil)
+	return r.withTx(ctx, func(txCtx context.Context, client *dbent.Client) error {
+		_, err := client.Bee.Query().
+			Where(
+				bee.IDEQ(id),
+				bee.UserIDEQ(userID),
+			).
+			ForUpdate().
+			Only(txCtx)
+		if err != nil {
+			return translatePersistenceError(err, service.ErrBeeNotFound, nil)
+		}
+
+		hasPlatforms, err := client.BeePlatform.Query().
+			Where(beeplatform.BeeIDEQ(id)).
+			Exist(txCtx)
+		if err != nil {
+			return err
+		}
+		if hasPlatforms {
+			return service.ErrBeeHasPlatformBindings
+		}
+
+		err = client.Bee.DeleteOneID(id).
+			Where(bee.UserIDEQ(userID)).
+			Exec(txCtx)
+		return translatePersistenceError(err, service.ErrBeeNotFound, nil)
+	})
+}
+
+func (r *beeRepository) withTx(
+	ctx context.Context,
+	fn func(context.Context, *dbent.Client) error,
+) error {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return fn(ctx, tx.Client())
+	}
+
+	tx, err := r.client.Tx(ctx)
+	if err != nil {
+		return fmt.Errorf("begin bee transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	txCtx := dbent.NewTxContext(ctx, tx)
+	if err := fn(txCtx, tx.Client()); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit bee transaction: %w", err)
+	}
+	return nil
 }
 
 func beeEntityToService(entity *dbent.Bee) *service.Bee {

@@ -96,6 +96,42 @@ func TestBeeRepository_MapsDeviceConflict(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrBeeDeviceAlreadyRegistered)
 }
 
+func TestBeeRepository_DeleteRequiresPlatformsUnboundAndManagesOwnTransaction(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	beeRepo := NewBeeRepository(client)
+	platformRepo := NewBeePlatformRepository(client)
+	ownerID := createBeeRepositoryOwner(t, ctx, client, "delete-bound-bee-owner")
+	beeRecord := newBeeRepositoryRecord(ownerID, uuid.New(), "bound")
+	require.NoError(t, beeRepo.Create(ctx, beeRecord))
+
+	platformRecord := newBeePlatformRepositoryRecord(
+		beeRecord.ID,
+		domain.PlatformOpenAI,
+		testUpstreamAccountKey("delete-bound-bee-account"),
+	)
+	require.NoError(t, platformRepo.Create(ctx, platformRecord))
+
+	require.ErrorIs(
+		t,
+		beeRepo.Delete(ctx, ownerID, beeRecord.ID),
+		service.ErrBeeHasPlatformBindings,
+	)
+	_, err := beeRepo.GetByID(ctx, beeRecord.ID)
+	require.NoError(t, err)
+	_, err = platformRepo.GetByPlatformAndAccountKey(
+		ctx,
+		platformRecord.Platform,
+		platformRecord.UpstreamAccountKey,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, platformRepo.Delete(ctx, beeRecord.ID, platformRecord.ID))
+	require.NoError(t, beeRepo.Delete(ctx, ownerID, beeRecord.ID))
+	_, err = beeRepo.GetByID(ctx, beeRecord.ID)
+	require.ErrorIs(t, err, service.ErrBeeNotFound)
+}
+
 func TestBeePlatformRepository_CRUDAndBindingQueries(t *testing.T) {
 	tx := testEntTx(t)
 	ctx := dbent.NewTxContext(context.Background(), tx)
