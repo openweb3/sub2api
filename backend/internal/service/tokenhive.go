@@ -152,6 +152,7 @@ func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *Tok
 	}
 	req.URL = proxyURL
 	req.Host = ""
+	*req = *req.WithContext(WithHTTPUpstreamRedirectsDisabled(req.Context()))
 	return nil
 }
 

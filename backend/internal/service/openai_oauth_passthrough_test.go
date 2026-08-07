@@ -214,6 +214,7 @@ func TestOrdinaryAccountForwardIsUnchanged(t *testing.T) {
 	require.Equal(t, "Bearer ordinary-key", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, "http://ordinary-proxy.example:8080", upstream.lastProxyURL)
 	require.Empty(t, upstream.lastReq.Header.Get(TokenHiveHeaderRequestID))
+	require.False(t, HTTPUpstreamRedirectsDisabled(upstream.lastReq.Context()))
 	require.Equal(t, originalBody, upstream.lastBody)
 }
 
