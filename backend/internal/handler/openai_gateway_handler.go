@@ -2678,6 +2678,7 @@ func (h *OpenAIGatewayHandler) handleStreamingAwareErrorWithCode(
 	}
 
 	// Normal case: return JSON response with proper status code
+	c.Header("Content-Type", "application/json; charset=utf-8")
 	if code == "" {
 		h.errorResponse(c, status, errType, message)
 		return
