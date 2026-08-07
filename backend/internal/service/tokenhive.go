@@ -176,3 +176,27 @@ func ResolveTokenHiveResponsePolicy(account *Account, registry *TokenHiveRegistr
 		AllowSchedulerFeedback: !dedicated,
 	}
 }
+
+func ordinaryTokenHiveResponsePolicy() TokenHiveResponsePolicy {
+	return TokenHiveResponsePolicy{
+		AllowSameAccountRetry:  true,
+		AllowAccountFailover:   true,
+		AllowAccountMutation:   true,
+		AllowRuntimeBlock:      true,
+		AllowSchedulerFeedback: true,
+	}
+}
+
+func (s *OpenAIGatewayService) ResolveTokenHiveResponsePolicy(account *Account) TokenHiveResponsePolicy {
+	if s == nil {
+		return ordinaryTokenHiveResponsePolicy()
+	}
+	if s.tokenHiveRegistry != nil {
+		return ResolveTokenHiveResponsePolicy(account, s.tokenHiveRegistry)
+	}
+	mapped, err := resolveTokenHiveAccount(s.cfg, nil, account)
+	if err != nil || mapped == nil {
+		return ordinaryTokenHiveResponsePolicy()
+	}
+	return TokenHiveResponsePolicy{Dedicated: true}
+}

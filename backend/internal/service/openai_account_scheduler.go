@@ -2248,6 +2248,13 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 }
 
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64, model string, success bool, firstTokenMs *int) {
+	s.ReportOpenAIAccountScheduleResultWithPolicy(ordinaryTokenHiveResponsePolicy(), accountID, model, success, firstTokenMs)
+}
+
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithPolicy(policy TokenHiveResponsePolicy, accountID int64, model string, success bool, firstTokenMs *int) {
+	if !policy.AllowSchedulerFeedback {
+		return
+	}
 	if success {
 		s.clearOpenAIAccountModelTransientState(accountID, normalizeOpenAIAccountModelTransientModel(model))
 	}
@@ -2259,6 +2266,13 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(accountID int64
 }
 
 func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {
+	s.RecordOpenAIAccountSwitchWithPolicy(ordinaryTokenHiveResponsePolicy())
+}
+
+func (s *OpenAIGatewayService) RecordOpenAIAccountSwitchWithPolicy(policy TokenHiveResponsePolicy) {
+	if !policy.AllowSchedulerFeedback {
+		return
+	}
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {
 		return

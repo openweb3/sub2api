@@ -306,10 +306,14 @@ func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte
 }
 
 func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account, responseBody []byte, canonicalModel ...string) bool {
+	return s.handleFailoverSideEffectsWithPolicy(ctx, resp, account, responseBody, ordinaryTokenHiveResponsePolicy(), canonicalModel...)
+}
+
+func (s *OpenAIGatewayService) handleFailoverSideEffectsWithPolicy(ctx context.Context, resp *http.Response, account *Account, responseBody []byte, policy TokenHiveResponsePolicy, canonicalModel ...string) bool {
 	if len(canonicalModel) > 0 {
-		return s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody, canonicalModel[0])
+		return s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, responseBody, policy, canonicalModel[0])
 	}
-	return s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody)
+	return s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, responseBody, policy)
 }
 
 func (s *OpenAIGatewayService) handleErrorResponse(
@@ -318,6 +322,18 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	c *gin.Context,
 	account *Account,
 	requestBody []byte,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
+	return s.handleErrorResponseWithPolicy(ctx, resp, c, account, requestBody, ordinaryTokenHiveResponsePolicy(), requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleErrorResponseWithPolicy(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestBody []byte,
+	policy TokenHiveResponsePolicy,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
@@ -394,7 +410,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
-		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, requestedModel...)
+		s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, body, policy, requestedModel...)
 		return nil, newOpenAIUpstreamFailoverError(
 			resp.StatusCode,
 			resp.Header,
@@ -463,7 +479,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		reqModel, _, _ = extractOpenAIRequestMetaFromBody(requestBody)
 		reqModel = canonicalOpenAIAccountSchedulingModel(account, reqModel)
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+	shouldDisable := s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, body, policy, reqModel)
 	kind := "http_error"
 	if shouldDisable {
 		kind = "failover"
