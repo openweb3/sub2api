@@ -804,6 +804,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			}
 			return nil, err
 		}
+		if err := applyTokenHiveHandoff(ctx, s.cfg, s.tokenHiveRegistry, account, getAPIKeyIDFromContext(c), upstreamModel, upstreamReq); err != nil {
+			if headerGuard != nil {
+				headerGuard.close()
+			}
+			return nil, fmt.Errorf("build tokenhive handoff: %w", err)
+		}
 
 		// Get proxy URL
 		proxyURL := ""

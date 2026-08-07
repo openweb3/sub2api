@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
@@ -86,6 +87,129 @@ func (u *httpUpstreamRecorder) Do(req *http.Request, proxyURL string, accountID 
 
 func (u *httpUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, accountID int64, accountConcurrency int, profile *tlsfingerprint.Profile) (*http.Response, error) {
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
+}
+
+func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalBody := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"keep <>& bytes","input":"hello"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	for _, name := range []string{
+		TokenHiveHeaderRequestID,
+		TokenHiveHeaderRawURL,
+		TokenHiveHeaderUpstreamType,
+		TokenHiveHeaderUpstreamModel,
+		TokenHiveHeaderTenantKey,
+		"x-tokenhive-forged-extra",
+	} {
+		c.Request.Header[name] = []string{"forged"}
+	}
+	c.Set("api_key", &APIKey{ID: 77})
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"captured"}}`)),
+	}}
+	cfg := tokenHiveConfigForTest(42)
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{TokenHive: cfg},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID: 42, Name: "tokenhive", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":                 "placeholder",
+			"base_url":                "https://api.openai.com",
+			"header_override_enabled": true,
+			"header_overrides": map[string]any{
+				"x-tokenhive-request-id":     "forged-override",
+				"X-TOKENHIVE-RAW-URL":        "forged-override",
+				"X-TokenHive-Upstream-Type":  CapabilityOpenAICodexResponsesHTTP,
+				"x-tokenhive-upstream-model": "forged-override",
+				"X-TokenHive-Tenant-Key":     "forged-override",
+				"x-ToKeNhIvE-forged-extra":   "forged-override",
+			},
+		},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+			openai_compat.ExtraKeyResponsesSupported: true,
+		},
+		Status: StatusActive, Schedulable: true,
+	}
+
+	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-client-stable-123")
+	result, forwardErr := svc.Forward(ctx, c, account, originalBody)
+	require.Error(t, forwardErr)
+	require.Nil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, cfg.ProxyURL, upstream.lastReq.URL.String())
+	require.Equal(t, originalBody, upstream.lastBody)
+	require.Equal(t, "client:openai-client-stable-123", upstream.lastReq.Header.Get(TokenHiveHeaderRequestID))
+	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.Header.Get(TokenHiveHeaderRawURL))
+	require.Equal(t, UpstreamTypeOpenAICodexOAuth, upstream.lastReq.Header.Get(TokenHiveHeaderUpstreamType))
+	require.NotEqual(t, CapabilityOpenAICodexResponsesHTTP, upstream.lastReq.Header.Get(TokenHiveHeaderUpstreamType))
+	require.Equal(t, "gpt-5.4", upstream.lastReq.Header.Get(TokenHiveHeaderUpstreamModel))
+	require.Len(t, upstream.lastReq.Header.Values(TokenHiveHeaderTenantKey), 1)
+	tokenHiveHeaderCount := 0
+	for name := range upstream.lastReq.Header {
+		if strings.HasPrefix(strings.ToLower(name), tokenHiveHeaderPrefix) {
+			tokenHiveHeaderCount++
+		}
+		if strings.EqualFold(name, "x-tokenhive-forged-extra") {
+			t.Fatalf("forged TokenHive header survived: %s", name)
+		}
+	}
+	require.Equal(t, 5, tokenHiveHeaderCount)
+}
+
+func TestOrdinaryAccountForwardIsUnchanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalBody := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"keep","input":"hello"}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(originalBody))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("User-Agent", "ordinary-client")
+	c.Set("api_key", &APIKey{ID: 78})
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"captured"}}`)),
+	}}
+	cfg := tokenHiveConfigForTest(42)
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{TokenHive: cfg},
+		httpUpstream: upstream,
+	}
+	proxyID := int64(9)
+	account := &Account{
+		ID: 43, Name: "ordinary", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "ordinary-key", "base_url": "https://ordinary.example"},
+		ProxyID:     &proxyID,
+		Proxy:       &Proxy{ID: proxyID, Protocol: "http", Host: "ordinary-proxy.example", Port: 8080},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeAuto),
+			openai_compat.ExtraKeyResponsesSupported: true,
+		},
+		Status: StatusActive, Schedulable: true,
+	}
+
+	result, forwardErr := svc.Forward(context.Background(), c, account, originalBody)
+	require.Error(t, forwardErr)
+	require.Nil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://ordinary.example/v1/responses", upstream.lastReq.URL.String())
+	require.Equal(t, "ordinary-client", upstream.lastReq.Header.Get("User-Agent"))
+	require.Equal(t, "Bearer ordinary-key", upstream.lastReq.Header.Get("Authorization"))
+	require.Equal(t, "http://ordinary-proxy.example:8080", upstream.lastProxyURL)
+	require.Empty(t, upstream.lastReq.Header.Get(TokenHiveHeaderRequestID))
+	require.Equal(t, originalBody, upstream.lastBody)
 }
 
 func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *testing.T) {

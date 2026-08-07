@@ -3,10 +3,12 @@ package config
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -99,6 +101,91 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	TokenHive               TokenHiveConfig               `mapstructure:"tokenhive"`
+}
+
+type TokenHiveConfig struct {
+	Enabled       bool             `mapstructure:"enabled"`
+	ProxyURL      string           `mapstructure:"proxy_url"`
+	TenantHMACKey string           `mapstructure:"tenant_hmac_key"`
+	Accounts      map[int64]string `mapstructure:"accounts"`
+}
+
+const tokenHiveOpenAICodexOAuthUpstreamType = "openai_codex_oauth"
+
+func DecodeTokenHiveTenantHMACKey(encoded string) ([]byte, error) {
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return nil, fmt.Errorf("tokenhive.tenant_hmac_key is required")
+	}
+	encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+	var decoded []byte
+	var err error
+	for _, encoding := range encodings {
+		decoded, err = encoding.DecodeString(encoded)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("tokenhive.tenant_hmac_key must be base64 encoded: %w", err)
+	}
+	if len(decoded) < 32 {
+		return nil, fmt.Errorf("tokenhive.tenant_hmac_key must decode to at least 32 bytes")
+	}
+	return decoded, nil
+}
+
+func ValidateTokenHiveConfig(cfg TokenHiveConfig) error {
+	return validateTokenHiveConfig(cfg)
+}
+
+func validateTokenHiveConfig(cfg TokenHiveConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	proxyURL, err := url.Parse(strings.TrimSpace(cfg.ProxyURL))
+	if err != nil {
+		return fmt.Errorf("tokenhive.proxy_url invalid: %w", err)
+	}
+	if proxyURL.Scheme != "http" || proxyURL.User != nil || proxyURL.Host == "" || proxyURL.RawQuery != "" || proxyURL.ForceQuery || proxyURL.Fragment != "" {
+		return fmt.Errorf("tokenhive.proxy_url must be a loopback HTTP URL without userinfo, query, or fragment")
+	}
+	hostIP := net.ParseIP(proxyURL.Hostname())
+	if hostIP == nil || !hostIP.IsLoopback() {
+		return fmt.Errorf("tokenhive.proxy_url host must be a loopback IP address")
+	}
+	if proxyURL.EscapedPath() != "/internal/v1/proxy" {
+		return fmt.Errorf("tokenhive.proxy_url path must be /internal/v1/proxy")
+	}
+	if _, err := DecodeTokenHiveTenantHMACKey(cfg.TenantHMACKey); err != nil {
+		return err
+	}
+	if len(cfg.Accounts) == 0 {
+		return fmt.Errorf("tokenhive.accounts must contain the dedicated account mapping")
+	}
+	seenTypes := make(map[string]int64, len(cfg.Accounts))
+	for accountID, upstreamType := range cfg.Accounts {
+		if accountID <= 0 {
+			return fmt.Errorf("tokenhive.accounts account ID must be positive")
+		}
+		if strings.TrimSpace(upstreamType) == "" {
+			return fmt.Errorf("tokenhive.accounts upstream type must not be empty")
+		}
+		if upstreamType != tokenHiveOpenAICodexOAuthUpstreamType {
+			return fmt.Errorf("tokenhive.accounts[%d] unsupported upstream type %q", accountID, upstreamType)
+		}
+		if previousID, exists := seenTypes[upstreamType]; exists {
+			return fmt.Errorf("tokenhive.accounts upstream type %q is mapped by both %d and %d", upstreamType, previousID, accountID)
+		}
+		seenTypes[upstreamType] = accountID
+	}
+	return nil
 }
 
 type LogConfig struct {
@@ -2485,6 +2572,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if err := validateTokenHiveConfig(c.TokenHive); err != nil {
+		return err
+	}
 	forwardedClientIPHeaders, err := NormalizeForwardedClientIPHeaders(c.Security.ForwardedClientIPHeaders)
 	if err != nil {
 		return fmt.Errorf("security.forwarded_client_ip_headers: %w", err)

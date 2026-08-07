@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sort"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -14,6 +16,69 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+func ProvideTokenHiveRegistry(cfg *config.Config, accountRepo AccountRepository) (*TokenHiveRegistry, error) {
+	if cfg == nil {
+		return NewTokenHiveRegistry(config.TokenHiveConfig{}, nil)
+	}
+	if !cfg.TokenHive.Enabled {
+		return NewTokenHiveRegistry(cfg.TokenHive, nil)
+	}
+	if accountRepo == nil {
+		return nil, fmt.Errorf("tokenhive account repository is required")
+	}
+	ids := make([]int64, 0, len(cfg.TokenHive.Accounts))
+	for id := range cfg.TokenHive.Accounts {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	loaded, err := accountRepo.GetByIDs(context.Background(), ids)
+	if err != nil {
+		return nil, fmt.Errorf("load tokenhive mapped accounts: %w", err)
+	}
+	accounts := make([]Account, 0, len(loaded))
+	for _, account := range loaded {
+		if account != nil {
+			accounts = append(accounts, *account)
+		}
+	}
+	return NewTokenHiveRegistry(cfg.TokenHive, accounts)
+}
+
+func ProvideOpenAIGatewayService(
+	tokenHiveRegistry *TokenHiveRegistry,
+	accountRepo AccountRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	openAITokenProvider *OpenAITokenProvider,
+	grokTokenProvider *GrokTokenProvider,
+	resolver *ModelPricingResolver,
+	channelService *ChannelService,
+	balanceNotifyService *BalanceNotifyService,
+	settingService *SettingService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+) *OpenAIGatewayService {
+	svc := NewOpenAIGatewayService(
+		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
+		cache, cfg, schedulerSnapshot, concurrencyService, billingService, rateLimitService,
+		billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider,
+		resolver, channelService, balanceNotifyService, settingService, userPlatformQuotaRepo,
+	)
+	svc.tokenHiveRegistry = tokenHiveRegistry
+	return svc
+}
 
 // BuildInfo contains build information
 type BuildInfo struct {
@@ -695,7 +760,8 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	NewOpenAIGatewayService,
+	ProvideTokenHiveRegistry,
+	ProvideOpenAIGatewayService,
 	ProvideImageStorageSettingService,
 	ProvideImageTaskService,
 	ProvideBatchImageModelPricingResolver,
