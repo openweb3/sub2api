@@ -232,6 +232,60 @@ func TestTokenHiveResponsePolicyPreservesUsageBillingAndPartialUsageSemantics(t 
 
 }
 
+func TestTokenHiveResponsePolicyPreservesDedicatedFailedSSE(t *testing.T) {
+	const failedSSE = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp-tokenhive-failed\",\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"provider failed\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n"
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello"}`)
+	for _, dedicated := range []bool{true, false} {
+		name := "ordinary"
+		if dedicated {
+			name = "dedicated"
+		}
+		t.Run(name, func(t *testing.T) {
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(failedSSE)),
+			}}
+			cfg := &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}}
+			account := &Account{ID: 81, Name: name, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Status: StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "external-key", "base_url": "https://api.openai.com"}}
+			var registry *TokenHiveRegistry
+			if dedicated {
+				tokenHiveCfg := tokenHiveConfigForTest(account.ID)
+				cfg.TokenHive = tokenHiveCfg
+				var err error
+				registry, err = NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+				require.NoError(t, err)
+			}
+			svc := &OpenAIGatewayService{
+				cfg: cfg, httpUpstream: upstream, tokenHiveRegistry: registry,
+				responseHeaderFilter: compileResponseHeaderFilter(cfg),
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("api_key", &APIKey{ID: 707})
+
+			result, err := svc.ForwardWithResponsePolicy(context.Background(), c, account, body, svc.ResolveTokenHiveResponsePolicy(account))
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			require.Len(t, upstream.requests, 1)
+			if dedicated {
+				require.ErrorContains(t, err, "upstream response failed")
+				require.Equal(t, http.StatusOK, recorder.Code)
+				require.Equal(t, "text/event-stream", recorder.Header().Get("Content-Type"))
+				require.Equal(t, failedSSE, recorder.Body.String())
+				return
+			}
+			var failoverErr *UpstreamFailoverError
+			require.ErrorAs(t, err, &failoverErr)
+			require.Empty(t, recorder.Body.String(), "ordinary pre-output failure must remain eligible for failover")
+		})
+	}
+}
+
 func TestTokenHiveResponsePolicyGuardsForwardCompatibilityRetries(t *testing.T) {
 	tests := []struct {
 		name         string

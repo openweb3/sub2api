@@ -436,7 +436,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoningAndPolicy(ctx
 						UpstreamOutTok: usage.OutputTokens,
 					})
 				}
-				if !openAIStreamClientOutputStarted(c, clientOutputStarted) {
+				if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !policy.Dedicated {
 					if status, errType, errMsg, matched := applyOpenAIStreamFailedErrorPassthroughRule(c, account.Platform, dataBytes, failedMessage); matched {
 						sawFailedEvent = true
 						// 命中透传规则也要记录 ops 上游错误事件（对齐 CC/Messages 与
@@ -507,14 +507,16 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoningAndPolicy(ctx
 				line = "data: " + data
 				eventType = strings.TrimSpace(gjson.GetBytes(dataBytes, "type").String())
 			}
-			if sanitizedData, sanitized := sanitizeOpenAIResponseFailedEventForClient(
-				dataBytes,
-				eventType,
-				openAIStreamClientOutputStarted(c, clientOutputStarted),
-			); sanitized {
-				dataBytes = sanitizedData
-				data = string(sanitizedData)
-				line = "data: " + data
+			if !policy.Dedicated {
+				if sanitizedData, sanitized := sanitizeOpenAIResponseFailedEventForClient(
+					dataBytes,
+					eventType,
+					openAIStreamClientOutputStarted(c, clientOutputStarted),
+				); sanitized {
+					dataBytes = sanitizedData
+					data = string(sanitizedData)
+					line = "data: " + data
+				}
 			}
 			// Replace model in response if needed.
 			// Fast path: most events do not contain model field values.

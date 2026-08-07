@@ -428,8 +428,7 @@ func TestTokenHiveResponsePolicyPreservesRealHandlerUsageBilling(t *testing.T) {
 }
 
 func TestTokenHiveResponsePolicyPreservesResponseFailedBillingSemantics(t *testing.T) {
-	var ordinaryStatus int
-	var ordinaryBody string
+	const failedSSE = "event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"code\":\"server_error\",\"message\":\"provider failed\"},\"usage\":{\"input_tokens\":4,\"output_tokens\":1}}}\n\n"
 	for _, dedicated := range []bool{false, true} {
 		policyName := "ordinary"
 		if dedicated {
@@ -439,16 +438,15 @@ func TestTokenHiveResponsePolicyPreservesResponseFailedBillingSemantics(t *testi
 			h, spies := newTokenHiveUsagePolicyHandler(t, dedicated, false, "response_failed")
 			rec := runTokenHiveUsagePolicyRequest(t, h, false)
 
-			require.NotEqual(t, http.StatusOK, rec.Code)
 			require.Zero(t, spies.usage.calls, "current response.failed path does not submit ordinary RecordUsage")
 			require.Zero(t, spies.user.deductCalls)
 			require.Zero(t, spies.subscription.incrementCalls)
 			if !dedicated {
-				ordinaryStatus = rec.Code
-				ordinaryBody = rec.Body.String()
+				require.NotEqual(t, http.StatusOK, rec.Code)
 			} else {
-				require.Equal(t, ordinaryStatus, rec.Code)
-				require.Equal(t, ordinaryBody, rec.Body.String())
+				require.Equal(t, http.StatusOK, rec.Code)
+				require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
+				require.Equal(t, failedSSE, rec.Body.String())
 			}
 		})
 	}
