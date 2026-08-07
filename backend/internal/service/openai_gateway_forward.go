@@ -837,9 +837,9 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 				_ = resp.Body.Close()
 			}
 			headerGuard.close()
-			return nil, s.newOpenAIFirstOutputTimeoutError(
+			return nil, s.newOpenAIFirstOutputTimeoutErrorWithPolicy(
 				ctx, c, account, startTime, originalModel, reasoningEffortValue,
-				firstOutputTimeout, "response_headers", nil,
+				firstOutputTimeout, "response_headers", nil, policy,
 			)
 		}
 		if err != nil {
@@ -867,7 +867,7 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 			upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 			upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 			upstreamCode := extractUpstreamErrorCode(respBody)
-			if !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
+			if policy.AllowSameAccountRetry && !agentTaskRecoveryTried && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 				agentTaskRecoveryTried = true
 				expectedTaskID := account.GetCredential("task_id")
 				if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -877,7 +877,7 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
-			if !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
+			if policy.AllowSameAccountRetry && !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
 				decoded, decodeErr := ensureReqBody()
 				if decodeErr != nil {
 					return nil, decodeErr
@@ -894,14 +894,16 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 				}
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Skip non-WSv2 invalid_encrypted_content retry because encrypted reasoning items are missing (account: %s)", account.Name)
 			}
-			if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
-				return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
-			} else if changed && rejectedFieldRetryState.Allow(retryBody) {
-				body = retryBody
-				requestView = newOpenAIRequestView(body)
-				reqBody = nil
-				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
-				continue
+			if policy.AllowSameAccountRetry {
+				if retryBody, reason, changed, retryErr := normalizeOpenAIResponsesRejectedFieldRetryBody(resp.StatusCode, body, respBody); retryErr != nil {
+					return nil, fmt.Errorf("normalize rejected Responses field retry body: %w", retryErr)
+				} else if changed && rejectedFieldRetryState.Allow(retryBody) {
+					body = retryBody
+					requestView = newOpenAIRequestView(body)
+					reqBody = nil
+					logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Retrying non-WSv2 request after %s (account: %s)", reason, account.Name)
+					continue
+				}
 			}
 			if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 				upstreamDetail := ""
@@ -947,7 +949,7 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 		imageCount := 0
 		var imageOutputSizes []string
 		if reqStream {
-			streamResult, err := s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue)
+			streamResult, err := s.handleStreamingResponseWithReasoningAndPolicy(ctx, resp, c, account, startTime, originalModel, upstreamModel, reasoningEffortValue, policy)
 			if err != nil {
 				return nil, err
 			}

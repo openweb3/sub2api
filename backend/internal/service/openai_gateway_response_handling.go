@@ -39,10 +39,14 @@ type openaiNonStreamingResult struct {
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel string) (*openaiStreamingResult, error) {
-	return s.handleStreamingResponseWithReasoning(ctx, resp, c, account, startTime, originalModel, mappedModel, "")
+	return s.handleStreamingResponseWithReasoningAndPolicy(ctx, resp, c, account, startTime, originalModel, mappedModel, "", ordinaryTokenHiveResponsePolicy())
 }
 
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
+	return s.handleStreamingResponseWithReasoningAndPolicy(ctx, resp, c, account, startTime, originalModel, mappedModel, reasoningEffort, ordinaryTokenHiveResponsePolicy())
+}
+
+func (s *OpenAIGatewayService) handleStreamingResponseWithReasoningAndPolicy(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string, policy TokenHiveResponsePolicy) (*openaiStreamingResult, error) {
 	firstOutputTimeout := time.Duration(0)
 	if account != nil && account.Platform == PlatformOpenAI {
 		firstOutputTimeout = s.openAIFirstOutputTimeout(reasoningEffort)
@@ -314,7 +318,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			// EOF dispatches the final SSE event even without a trailing blank line.
 			completeGuardedEvent(true)
 		}
-		if sawTerminalEvent && !sawFailedEvent {
+		if policy.AllowSchedulerFeedback && sawTerminalEvent && !sawFailedEvent {
 			s.clearOpenAIProxyStreamDisconnect(account)
 		}
 		if !sawTerminalEvent && !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
@@ -329,7 +333,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 		flushPending("Client disconnected during final flush, returning collected usage")
 		if !sawTerminalEvent {
-			if openAIStreamClientOutputStarted(c, clientOutputStarted) && !clientDisconnected {
+			if policy.AllowSchedulerFeedback && openAIStreamClientOutputStarted(c, clientOutputStarted) && !clientDisconnected {
 				s.recordOpenAIProxyStreamDisconnect(account, errors.New("stream ended before terminal event"), upstreamRequestID)
 			}
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete: missing terminal event")
@@ -362,7 +366,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			return resultWithUsage(), failoverErr, true
 		}
 		if sawTerminalEvent {
-			if !sawFailedEvent {
+			if policy.AllowSchedulerFeedback && !sawFailedEvent {
 				s.clearOpenAIProxyStreamDisconnect(account)
 				logger.LegacyPrintf("service.openai_gateway", "Upstream scan ended after terminal event: %v", scanErr)
 			}
@@ -393,7 +397,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		if clientDisconnected {
 			return resultWithUsage(), fmt.Errorf("stream usage incomplete after disconnect: %w", scanErr), true
 		}
-		s.recordOpenAIProxyStreamDisconnect(account, scanErr, upstreamRequestID)
+		if policy.AllowSchedulerFeedback {
+			s.recordOpenAIProxyStreamDisconnect(account, scanErr, upstreamRequestID)
+		}
 		sendErrorEvent("stream_read_error")
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
@@ -684,9 +690,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			}
 			logger.LegacyPrintf("service.openai_gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
 			// 处理流超时，可能标记账户为临时不可调度或错误状态
-			if s.rateLimitService != nil {
-				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
-			}
+			s.handleOpenAIStreamTimeoutWithPolicy(ctx, account, originalModel, policy)
 			sendErrorEvent("stream_timeout")
 			return resultWithUsage(), fmt.Errorf("stream data interval timeout")
 
@@ -699,9 +703,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			for ev := range events {
 				markEventProcessed(ev)
 			}
-			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutError(
+			return resultWithUsage(), s.newOpenAIFirstOutputTimeoutErrorWithPolicy(
 				ctx, c, account, startTime, originalModel, reasoningEffort,
-				firstOutputTimeout, "semantic_output", resp.Header,
+				firstOutputTimeout, "semantic_output", resp.Header, policy,
 			)
 
 		case <-keepaliveCh:
@@ -740,6 +744,13 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 	}
 
+}
+
+func (s *OpenAIGatewayService) handleOpenAIStreamTimeoutWithPolicy(ctx context.Context, account *Account, model string, policy TokenHiveResponsePolicy) {
+	if s == nil || s.rateLimitService == nil || !policy.AllowAccountMutation || !policy.AllowRuntimeBlock {
+		return
+	}
+	s.rateLimitService.HandleStreamTimeout(ctx, account, model)
 }
 
 // extractOpenAISSEDataLine 低开销提取 SSE `data:` 行内容。
