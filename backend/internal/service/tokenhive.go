@@ -74,6 +74,27 @@ func (r *TokenHiveRegistry) Match(account *Account) (TokenHiveAccount, bool) {
 	return mapped, ok
 }
 
+func resolveTokenHiveAccount(cfg *config.Config, registry *TokenHiveRegistry, account *Account) (*TokenHiveAccount, error) {
+	if cfg == nil || !cfg.TokenHive.Enabled || account == nil {
+		return nil, nil
+	}
+	if registry == nil {
+		if _, configured := cfg.TokenHive.Accounts[account.ID]; !configured {
+			return nil, nil
+		}
+		var err error
+		registry, err = NewTokenHiveRegistry(cfg.TokenHive, []Account{*account})
+		if err != nil {
+			return nil, err
+		}
+	}
+	mapped, ok := registry.Match(account)
+	if !ok {
+		return nil, nil
+	}
+	return &mapped, nil
+}
+
 func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, rawURL string, upstreamModel string, account TokenHiveAccount, key []byte) (http.Header, error) {
 	if apiKeyRecordID <= 0 {
 		return nil, fmt.Errorf("tokenhive API key record ID must be positive")
@@ -105,29 +126,15 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, rawURL st
 	return headers, nil
 }
 
-func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, registry *TokenHiveRegistry, account *Account, apiKeyRecordID int64, upstreamModel string, req *http.Request) error {
+func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *TokenHiveAccount, apiKeyRecordID int64, upstreamModel string, req *http.Request) error {
 	if cfg == nil || !cfg.TokenHive.Enabled || account == nil || req == nil {
-		return nil
-	}
-	if registry == nil {
-		if _, configured := cfg.TokenHive.Accounts[account.ID]; !configured {
-			return nil
-		}
-		var err error
-		registry, err = NewTokenHiveRegistry(cfg.TokenHive, []Account{*account})
-		if err != nil {
-			return err
-		}
-	}
-	mapped, ok := registry.Match(account)
-	if !ok {
 		return nil
 	}
 	key, err := config.DecodeTokenHiveTenantHMACKey(cfg.TokenHive.TenantHMACKey)
 	if err != nil {
 		return err
 	}
-	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, req.URL.String(), upstreamModel, mapped, key)
+	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, req.URL.String(), upstreamModel, *account, key)
 	if err != nil {
 		return err
 	}
