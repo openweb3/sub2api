@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"net"
 	"net/textproto"
 	"net/url"
 	"os"
@@ -156,9 +155,8 @@ func validateTokenHiveConfig(cfg TokenHiveConfig) error {
 	if proxyURL.Scheme != "http" || proxyURL.User != nil || proxyURL.Host == "" || proxyURL.RawQuery != "" || proxyURL.ForceQuery || proxyURL.Fragment != "" {
 		return fmt.Errorf("tokenhive.proxy_url must be a loopback HTTP URL without userinfo, query, or fragment")
 	}
-	hostIP := net.ParseIP(proxyURL.Hostname())
-	if hostIP == nil || !hostIP.IsLoopback() {
-		return fmt.Errorf("tokenhive.proxy_url host must be a loopback IP address")
+	if proxyURL.Hostname() != "127.0.0.1" {
+		return fmt.Errorf("tokenhive.proxy_url host must be 127.0.0.1")
 	}
 	if proxyURL.EscapedPath() != "/internal/v1/proxy" {
 		return fmt.Errorf("tokenhive.proxy_url path must be /internal/v1/proxy")

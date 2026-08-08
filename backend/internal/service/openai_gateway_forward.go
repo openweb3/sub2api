@@ -877,6 +877,11 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 			}
 			respBody = s.redactAgentIdentitySensitiveBody(ctx, account, respBody)
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			if policy.Dedicated {
+				if _, _, ok := trustedTokenHiveExecutionError(resp, respBody); ok {
+					return s.handleErrorResponseWithPolicy(ctx, resp, c, account, body, policy, billingModel)
+				}
+			}
 			if policy.AllowSameAccountRetry && !httpInvalidEncryptedContentRetryTried && resp.StatusCode == http.StatusBadRequest && upstreamCode == "invalid_encrypted_content" {
 				decoded, decodeErr := ensureReqBody()
 				if decodeErr != nil {

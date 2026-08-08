@@ -338,6 +338,23 @@ func (s *OpenAIGatewayService) handleErrorResponseWithPolicy(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
+	if source, code, ok := trustedTokenHiveExecutionError(resp, body); policy.Dedicated && ok {
+		const clientMessage = "TokenHive execution failed"
+		setOpsUpstreamError(c, 0, clientMessage, "")
+		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			Platform:    account.Platform,
+			AccountID:   account.ID,
+			AccountName: account.Name,
+			Kind:        "request_error",
+			Stage:       "tokenhive_execution",
+			Scope:       source,
+			Reason:      code,
+			Message:     clientMessage,
+		})
+		MarkResponseCommitted(c)
+		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"message": clientMessage, "source": source, "type": code}})
+		return nil, fmt.Errorf("tokenhive execution error: source=%s code=%s", source, code)
+	}
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
 	// 当前请求恒透传（需求1）；标记供 handler 事后写风控/邮件。400 cyber 不可 failover
@@ -545,6 +562,41 @@ func (s *OpenAIGatewayService) handleErrorResponseWithPolicy(
 		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 	}
 	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+}
+
+func trustedTokenHiveExecutionError(resp *http.Response, body []byte) (string, string, bool) {
+	if resp == nil || resp.Header.Get("X-TokenHive-Execution-Error") != "1" {
+		return "", "", false
+	}
+	return parseTokenHiveExecutionError(body)
+}
+
+func parseTokenHiveExecutionError(body []byte) (string, string, bool) {
+	var envelope struct {
+		Error struct {
+			Source string `json:"source"`
+			Type   string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) != nil || (envelope.Error.Source != "hive" && envelope.Error.Source != "bee") {
+		return "", "", false
+	}
+	switch envelope.Error.Type {
+	case "no_capacity",
+		"ownership_persist_failed",
+		"bee_disconnected",
+		"adapter_unsupported",
+		"credential_unavailable",
+		"token_refresh_failed",
+		"target_not_allowed",
+		"upstream_connect_failed",
+		"stream_interrupted",
+		"cancelled",
+		"internal_error":
+		return envelope.Error.Source, envelope.Error.Type, true
+	default:
+		return "", "", false
+	}
 }
 
 // compatErrorWriter is the signature for format-specific error writers used by

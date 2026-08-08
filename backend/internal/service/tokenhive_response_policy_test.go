@@ -3,7 +3,9 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -122,6 +124,131 @@ func TestTokenHiveResponsePolicySuppressesTransportAndUpstreamSideEffects(t *tes
 	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-5.4"))
 	require.Zero(t, scheduler.reports)
 	require.Zero(t, scheduler.switches)
+}
+
+func TestTokenHiveResponsePolicyPreservesTrustedExecutionError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	account := &Account{ID: 81, Name: "tokenhive", Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	response := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Header: http.Header{
+			"Content-Type":                []string{"application/json"},
+			"X-Tokenhive-Execution-Error": []string{"1"},
+		},
+		Body: io.NopCloser(strings.NewReader(`{"error":{"message":"proxy request failed","type":"credential_unavailable","source":"bee"}}`)),
+	}
+	svc := &OpenAIGatewayService{}
+
+	result, err := svc.handleErrorResponseWithPolicy(context.Background(), response, c, account, nil, tokenHiveDedicatedPolicy())
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.True(t, IsResponseCommitted(c))
+	var clientResponse struct {
+		Error struct {
+			Source  string `json:"source"`
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &clientResponse))
+	require.Equal(t, "bee", clientResponse.Error.Source)
+	require.Equal(t, "credential_unavailable", clientResponse.Error.Type)
+	require.Equal(t, "TokenHive execution failed", clientResponse.Error.Message)
+	rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+	require.True(t, ok)
+	events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	require.Equal(t, "request_error", events[0].Kind)
+	require.Equal(t, "tokenhive_execution", events[0].Stage)
+	require.Equal(t, "bee", events[0].Scope)
+	require.Equal(t, "credential_unavailable", events[0].Reason)
+	require.Empty(t, events[0].UpstreamResponseBody)
+}
+
+func TestTokenHiveResponsePolicyHandlesExecutionErrorBeforeFailover(t *testing.T) {
+	body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello"}`)
+	tests := []struct {
+		name   string
+		status int
+		source string
+		code   string
+	}{
+		{name: "credential unavailable", status: http.StatusBadGateway, source: "bee", code: "credential_unavailable"},
+		{name: "no capacity", status: http.StatusServiceUnavailable, source: "hive", code: "no_capacity"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("api_key", &APIKey{ID: 707})
+			account := &Account{ID: 81, Name: "tokenhive", Type: AccountTypeAPIKey, Platform: PlatformOpenAI, Status: StatusActive, Schedulable: true,
+				Credentials: map[string]any{"api_key": "external-key", "base_url": "https://api.openai.com"}}
+			tokenHiveCfg := tokenHiveConfigForTest(account.ID)
+			registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+			require.NoError(t, err)
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: tt.status,
+				Header: http.Header{
+					"Content-Type":                []string{"application/json"},
+					"X-Tokenhive-Execution-Error": []string{"1"},
+				},
+				Body: io.NopCloser(strings.NewReader(fmt.Sprintf(`{"error":{"message":"proxy request failed","type":%q,"source":%q}}`, tt.code, tt.source))),
+			}}
+			svc := &OpenAIGatewayService{
+				cfg: &config.Config{TokenHive: tokenHiveCfg}, httpUpstream: upstream, tokenHiveRegistry: registry,
+				responseHeaderFilter: compileResponseHeaderFilter(&config.Config{}),
+			}
+
+			result, err := svc.ForwardWithResponsePolicy(context.Background(), c, account, body, svc.ResolveTokenHiveResponsePolicy(account))
+
+			require.ErrorContains(t, err, "tokenhive execution error")
+			require.Nil(t, result)
+			require.Len(t, upstream.requests, 1)
+			require.True(t, IsResponseCommitted(c))
+			require.Equal(t, tt.status, recorder.Code)
+			rawEvents, ok := c.Get(OpsUpstreamErrorsKey)
+			require.True(t, ok)
+			events, ok := rawEvents.([]*OpsUpstreamErrorEvent)
+			require.True(t, ok)
+			require.Len(t, events, 1)
+			require.Equal(t, "request_error", events[0].Kind)
+			require.Equal(t, "tokenhive_execution", events[0].Stage)
+			require.Equal(t, tt.source, events[0].Scope)
+			require.Equal(t, tt.code, events[0].Reason)
+		})
+	}
+}
+
+func TestTokenHiveExecutionErrorRequiresLocalProxyMarker(t *testing.T) {
+	body := []byte(`{"error":{"type":"credential_unavailable","source":"bee"}}`)
+	response := &http.Response{Header: http.Header{}}
+	if _, _, ok := trustedTokenHiveExecutionError(response, body); ok {
+		t.Fatal("provider-controlled JSON was accepted without the local proxy marker")
+	}
+	response.Header.Set("X-TokenHive-Execution-Error", "1")
+	if source, code, ok := trustedTokenHiveExecutionError(response, body); !ok || source != "bee" || code != "credential_unavailable" {
+		t.Fatalf("marked local proxy error was rejected: source=%q code=%q ok=%v", source, code, ok)
+	}
+}
+
+func TestParseTokenHiveExecutionErrorRejectsUntrustedProvenance(t *testing.T) {
+	tests := []string{
+		`{"error":{"type":"credential_unavailable","source":"upstream"}}`,
+		`{"error":{"type":"provider_supplied_code","source":"bee"}}`,
+		`{"error":{"type":"credential_unavailable"}}`,
+		`{"error":{"type":"credential_unavailable","source":"bee"`,
+	}
+	for _, body := range tests {
+		if source, code, ok := parseTokenHiveExecutionError([]byte(body)); ok {
+			t.Fatalf("untrusted body accepted: source=%q code=%q body=%s", source, code, body)
+		}
+	}
 }
 
 func TestOrdinaryAccountResponsePolicyPreservesSideEffects(t *testing.T) {

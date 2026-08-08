@@ -32,6 +32,8 @@ func TestTokenHiveConfigRejectsInvalidRegistry(t *testing.T) {
 		}},
 		{name: "unknown upstream type", mutate: func(cfg *TokenHiveConfig) { cfg.Accounts = map[int64]string{42: "other"} }},
 		{name: "non-loopback URL", mutate: func(cfg *TokenHiveConfig) { cfg.ProxyURL = "http://example.com/internal/v1/proxy" }},
+		{name: "alternate IPv4 loopback", mutate: func(cfg *TokenHiveConfig) { cfg.ProxyURL = "http://127.0.0.2:18081/internal/v1/proxy" }},
+		{name: "IPv6 loopback", mutate: func(cfg *TokenHiveConfig) { cfg.ProxyURL = "http://[::1]:18081/internal/v1/proxy" }},
 		{name: "HTTPS URL", mutate: func(cfg *TokenHiveConfig) { cfg.ProxyURL = "https://127.0.0.1:18081/internal/v1/proxy" }},
 		{name: "wrong path", mutate: func(cfg *TokenHiveConfig) { cfg.ProxyURL = "http://127.0.0.1:18081/v1/responses" }},
 		{name: "URL query", mutate: func(cfg *TokenHiveConfig) { cfg.ProxyURL += "?forged=true" }},
