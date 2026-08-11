@@ -63,6 +63,42 @@ func TestOpenAIGatewayService_APIKeyPassthrough_StripsInvalidInputItemIDs(t *tes
 	require.Equal(t, "item_unconstrained", gjson.GetBytes(forwarded, "input.5.id").String())
 }
 
+func TestOpenAIGatewayService_TokenHiveHandoff_PreservesCodexInputItemIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"resp_test","model":"gpt-5.6-sol","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`,
+		)),
+	}}
+	account := newOpenAIImageGenerationControlTestAccount()
+	account.ID = 5152
+	cfg := tokenHiveConfigForTest(account.ID)
+	registry, err := NewTokenHiveRegistry(cfg, []Account{*account})
+	require.NoError(t, err)
+	svc := newOpenAIImageGenerationControlTestService(upstream)
+	svc.cfg.TokenHive = cfg
+	svc.tokenHiveRegistry = registry
+	c, _ := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.144.1")
+
+	body := []byte(`{
+		"model":"gpt-5.6-sol",
+		"stream":false,
+		"input":[
+			{"type":"message","id":"item_bad_message","role":"assistant","content":[{"type":"output_text","text":"hello"}]},
+			{"type":"function_call","id":"item_bad_call","call_id":"call_123","name":"exec_command","arguments":"{}"}
+		]
+	}`)
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "item_bad_message", gjson.GetBytes(upstream.lastBody, "input.0.id").String())
+	require.Equal(t, "item_bad_call", gjson.GetBytes(upstream.lastBody, "input.1.id").String())
+}
+
 func TestSanitizeOpenAIResponsesInputItemIDs_AllocationGrowthIsLinear(t *testing.T) {
 	makeBody := func(itemCount int) []byte {
 		items := make([]string, itemCount)

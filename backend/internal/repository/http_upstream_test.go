@@ -22,6 +22,19 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+func TestHTTPUpstreamRejectsOrdinaryLoopbackWhenPrivateHostsDisallowed(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Security.URLAllowlist.Enabled = true
+	cfg.Security.URLAllowlist.AllowPrivateHosts = false
+	upstream := NewHTTPUpstream(cfg)
+	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:18081/internal/v1/proxy", nil)
+	require.NoError(t, err)
+
+	resp, err := upstream.Do(req, "", 1, 1)
+	require.Error(t, err)
+	require.Nil(t, resp)
+}
+
 func TestHTTPUpstreamDoCanDisableRedirectsPerRequest(t *testing.T) {
 	var redirectedCalls atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

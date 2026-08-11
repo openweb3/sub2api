@@ -574,6 +574,9 @@ func (s *httpUpstreamService) validateRequestHost(req *http.Request) error {
 	if req == nil || req.URL == nil {
 		return errors.New("request url is nil")
 	}
+	if isValidatedTokenHiveLoopbackHandoff(req) {
+		return nil
+	}
 	host := strings.TrimSpace(req.URL.Hostname())
 	if host == "" {
 		return errors.New("request host is empty")
@@ -582,6 +585,19 @@ func (s *httpUpstreamService) validateRequestHost(req *http.Request) error {
 		return err
 	}
 	return nil
+}
+
+func isValidatedTokenHiveLoopbackHandoff(req *http.Request) bool {
+	if req == nil || req.URL == nil || !service.IsTokenHiveInternalHandoff(req.Context()) {
+		return false
+	}
+	return req.URL.Scheme == "http" &&
+		req.URL.Hostname() == "127.0.0.1" &&
+		req.URL.EscapedPath() == "/internal/v1/proxy" &&
+		req.URL.User == nil &&
+		req.URL.RawQuery == "" &&
+		!req.URL.ForceQuery &&
+		req.URL.Fragment == ""
 }
 
 func (s *httpUpstreamService) redirectChecker(req *http.Request, via []*http.Request) error {

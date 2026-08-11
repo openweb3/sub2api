@@ -84,7 +84,10 @@ func TestTokenHiveMappedForwardDoesNotReplayRedirect(t *testing.T) {
 	registry, err := service.NewTokenHiveRegistry(tokenHiveCfg, []service.Account{*account})
 	require.NoError(t, err)
 	cfg := &config.Config{TokenHive: tokenHiveCfg}
-	upstream := &tokenHiveResponseRecordingUpstream{HTTPUpstream: repository.NewHTTPUpstream(nil)}
+	cfg.Security.URLAllowlist.Enabled = true
+	cfg.Security.URLAllowlist.UpstreamHosts = []string{"api.openai.com"}
+	cfg.Security.URLAllowlist.AllowPrivateHosts = false
+	upstream := &tokenHiveResponseRecordingUpstream{HTTPUpstream: repository.NewHTTPUpstream(cfg)}
 	gateway := service.ProvideOpenAIGatewayService(
 		registry,
 		nil, nil, nil, nil, nil, nil, nil,
