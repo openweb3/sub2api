@@ -22,6 +22,7 @@ const (
 	TokenHiveHeaderUpstreamType        = "X-TokenHive-Upstream-Type"
 	TokenHiveHeaderUpstreamModel       = "X-TokenHive-Upstream-Model"
 	TokenHiveHeaderTenantKey           = "X-TokenHive-Tenant-Key"
+	TokenHiveHeaderMethod              = "X-TokenHive-Method"
 	tokenHiveHeaderPrefix              = "x-tokenhive-"
 	tokenHiveTenantKeyMessagePrefix    = "tokenhive:tenant-key:v1\x00api-key-record-id\x00"
 )
@@ -95,7 +96,7 @@ func resolveTokenHiveAccount(cfg *config.Config, registry *TokenHiveRegistry, ac
 	return &mapped, nil
 }
 
-func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, rawURL string, upstreamModel string, account TokenHiveAccount, key []byte) (http.Header, error) {
+func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method string, rawURL string, upstreamModel string, account TokenHiveAccount, key []byte) (http.Header, error) {
 	if apiKeyRecordID <= 0 {
 		return nil, fmt.Errorf("tokenhive API key record ID must be positive")
 	}
@@ -104,6 +105,9 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, rawURL st
 	}
 	if len(key) < 32 {
 		return nil, fmt.Errorf("tokenhive tenant HMAC key must be at least 32 bytes")
+	}
+	if method != http.MethodGet && method != http.MethodPost {
+		return nil, fmt.Errorf("invalid tokenhive logical method")
 	}
 	parsedRawURL, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsedRawURL.Scheme == "" || parsedRawURL.Host == "" {
@@ -117,12 +121,13 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, rawURL st
 	_, _ = mac.Write([]byte(tokenHiveTenantKeyMessagePrefix + strconv.FormatInt(apiKeyRecordID, 10)))
 	tenantKey := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
-	headers := make(http.Header, 5)
+	headers := make(http.Header, 6)
 	headers.Set(TokenHiveHeaderRequestID, ResolveUsageBillingRequestID(ctx, ""))
 	headers.Set(TokenHiveHeaderRawURL, parsedRawURL.String())
 	headers.Set(TokenHiveHeaderUpstreamType, account.UpstreamType)
 	headers.Set(TokenHiveHeaderUpstreamModel, upstreamModel)
 	headers.Set(TokenHiveHeaderTenantKey, tenantKey)
+	headers.Set(TokenHiveHeaderMethod, method)
 	return headers, nil
 }
 
@@ -134,7 +139,8 @@ func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *Tok
 	if err != nil {
 		return err
 	}
-	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, req.URL.String(), upstreamModel, *account, key)
+	logicalMethod := req.Method
+	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, logicalMethod, req.URL.String(), upstreamModel, *account, key)
 	if err != nil {
 		return err
 	}
@@ -151,6 +157,7 @@ func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *Tok
 		return fmt.Errorf("parse tokenhive proxy URL: %w", err)
 	}
 	req.URL = proxyURL
+	req.Method = http.MethodPost
 	req.Host = ""
 	requestContext := WithTokenHiveInternalHandoff(req.Context())
 	requestContext = WithHTTPUpstreamRedirectsDisabled(requestContext)

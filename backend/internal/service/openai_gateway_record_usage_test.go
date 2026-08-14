@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -879,7 +880,7 @@ func TestOpenAIGatewayServiceRecordUsage_PrefersClientRequestIDOverUpstreamReque
 	require.NoError(t, registryErr)
 	tokenHiveAccount, ok := registry.Match(&Account{ID: 30049, Type: AccountTypeAPIKey, Platform: PlatformOpenAI})
 	require.True(t, ok)
-	metadata, metadataErr := BuildTokenHiveMetadata(ctx, 10049, "https://api.openai.com/v1/responses", "gpt-5.1", tokenHiveAccount, []byte("slice-1-test-tenant-hmac-key-32bytes"))
+	metadata, metadataErr := BuildTokenHiveMetadata(ctx, 10049, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.1", tokenHiveAccount, []byte("slice-1-test-tenant-hmac-key-32bytes"))
 	require.NoError(t, metadataErr)
 	require.Equal(t, usageRepo.lastLog.RequestID, metadata.Get(TokenHiveHeaderRequestID))
 }

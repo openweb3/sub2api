@@ -103,6 +103,7 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 		TokenHiveHeaderUpstreamType,
 		TokenHiveHeaderUpstreamModel,
 		TokenHiveHeaderTenantKey,
+		TokenHiveHeaderMethod,
 		"x-tokenhive-forged-extra",
 	} {
 		c.Request.Header[name] = []string{"forged"}
@@ -159,6 +160,7 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 	require.NotEqual(t, CapabilityOpenAICodexResponsesHTTP, upstream.lastReq.Header.Get(TokenHiveHeaderUpstreamType))
 	require.Equal(t, "gpt-5.4", upstream.lastReq.Header.Get(TokenHiveHeaderUpstreamModel))
 	require.Len(t, upstream.lastReq.Header.Values(TokenHiveHeaderTenantKey), 1)
+	require.Equal(t, http.MethodPost, upstream.lastReq.Header.Get(TokenHiveHeaderMethod))
 	tokenHiveHeaderCount := 0
 	for name := range upstream.lastReq.Header {
 		if strings.HasPrefix(strings.ToLower(name), tokenHiveHeaderPrefix) {
@@ -168,7 +170,7 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 			t.Fatalf("forged TokenHive header survived: %s", name)
 		}
 	}
-	require.Equal(t, 5, tokenHiveHeaderCount)
+	require.Equal(t, 6, tokenHiveHeaderCount)
 }
 
 func TestOrdinaryAccountForwardIsUnchanged(t *testing.T) {
