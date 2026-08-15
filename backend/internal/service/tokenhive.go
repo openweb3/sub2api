@@ -15,16 +15,17 @@ import (
 )
 
 const (
-	UpstreamTypeOpenAICodexOAuth       = "openai_codex_oauth"
-	CapabilityOpenAICodexResponsesHTTP = "openai.codex.responses.http"
-	TokenHiveHeaderRequestID           = "X-TokenHive-Request-ID"
-	TokenHiveHeaderRawURL              = "X-TokenHive-Raw-URL"
-	TokenHiveHeaderUpstreamType        = "X-TokenHive-Upstream-Type"
-	TokenHiveHeaderUpstreamModel       = "X-TokenHive-Upstream-Model"
-	TokenHiveHeaderTenantKey           = "X-TokenHive-Tenant-Key"
-	TokenHiveHeaderMethod              = "X-TokenHive-Method"
-	tokenHiveHeaderPrefix              = "x-tokenhive-"
-	tokenHiveTenantKeyMessagePrefix    = "tokenhive:tenant-key:v1\x00api-key-record-id\x00"
+	UpstreamTypeOpenAICodexOAuth        = "openai_codex_oauth"
+	CapabilityOpenAICodexResponsesHTTP  = "openai.codex.responses.http"
+	CapabilityOpenAICodexModelsManifest = "openai.codex.models.manifest"
+	TokenHiveHeaderRequestID            = "X-TokenHive-Request-ID"
+	TokenHiveHeaderRawURL               = "X-TokenHive-Raw-URL"
+	TokenHiveHeaderUpstreamType         = "X-TokenHive-Upstream-Type"
+	TokenHiveHeaderUpstreamModel        = "X-TokenHive-Upstream-Model"
+	TokenHiveHeaderTenantKey            = "X-TokenHive-Tenant-Key"
+	TokenHiveHeaderMethod               = "X-TokenHive-Method"
+	tokenHiveHeaderPrefix               = "x-tokenhive-"
+	tokenHiveTenantKeyMessagePrefix     = "tokenhive:tenant-key:v1\x00api-key-record-id\x00"
 )
 
 type TokenHiveAccount struct {
