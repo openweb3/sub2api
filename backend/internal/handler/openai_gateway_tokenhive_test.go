@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type tokenHiveHandlerAccountRepo struct {
@@ -114,6 +116,16 @@ func (u *tokenHiveHandlerUpstream) Do(_ *http.Request, _ string, accountID int64
 	case "images_empty":
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(bytes.NewBufferString(`{"created":1710000021,"data":[]}`))}, nil
+	case "images_error_event":
+		return tokenHiveHandlerImagesErrorResponse(http.StatusBadRequest, "image_generation_user_error", "moderation_blocked", "Your request was blocked by the safety system"), nil
+	case "images_response_failed":
+		return tokenHiveHandlerImagesErrorResponse(http.StatusBadRequest, "image_generation_user_error", "moderation_blocked", "The safety system rejected this image"), nil
+	case "images_incomplete_retryable":
+		return tokenHiveHandlerImagesErrorResponse(http.StatusBadGateway, "incomplete_error", "response_incomplete", "Upstream image generation incomplete: max_output_tokens"), nil
+	case "images_incomplete_policy":
+		return tokenHiveHandlerImagesErrorResponse(http.StatusBadRequest, "image_generation_user_error", "response_incomplete", "Upstream image generation incomplete: content_filter"), nil
+	case "images_completed_refusal":
+		return tokenHiveHandlerImagesErrorResponse(http.StatusBadRequest, "image_generation_user_error", "content_policy_violation", "This request conflicts with our image safety policy"), nil
 	case "images_stream_success":
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(
 			"data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\"}\n\n" +
@@ -215,6 +227,12 @@ type tokenHiveHandlerBillingSpies struct {
 func tokenHiveHandlerErrorResponse(status int) *http.Response {
 	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}},
 		Body: io.NopCloser(bytes.NewBufferString(`{"error":{"message":"upstream failed"}}`))}
+}
+
+func tokenHiveHandlerImagesErrorResponse(status int, errType, code, message string) *http.Response {
+	body := fmt.Sprintf(`{"error":{"type":%q,"code":%q,"message":%q}}`, errType, code, message)
+	return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(bytes.NewBufferString(body))}
 }
 
 type tokenHiveHandlerReadErrorBody struct {
@@ -541,15 +559,64 @@ func TestTokenHiveResponsePolicyPreservesResponseFailedBillingSemantics(t *testi
 	}
 }
 
-func TestTokenHiveImagesZeroOutputDoesNotRecordSuccessfulUsageOrBillRequestedN(t *testing.T) {
-	h, spies := newTokenHiveUsagePolicyHandler(t, true, false, "images_empty")
-	rec := runTokenHiveImagesUsagePolicyRequest(t, h)
+func TestTokenHiveImagesZeroOutputHonorsOrdinaryAndDedicatedBillingBoundary(t *testing.T) {
+	for _, dedicated := range []bool{false, true} {
+		name := "ordinary"
+		if dedicated {
+			name = "dedicated"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, spies := newTokenHiveUsagePolicyHandler(t, dedicated, false, "images_empty")
+			rec := runTokenHiveImagesUsagePolicyRequest(t, h)
 
-	require.Equal(t, http.StatusBadGateway, rec.Code, "body=%s", rec.Body.String())
-	require.Equal(t, 1, spies.upstream.callCount())
-	require.Zero(t, spies.usage.calls)
-	require.Zero(t, spies.user.deductCalls)
-	require.Zero(t, spies.subscription.incrementCalls)
+			require.Equal(t, 1, spies.upstream.callCount())
+			if dedicated {
+				require.Equal(t, http.StatusBadGateway, rec.Code, "body=%s", rec.Body.String())
+				require.Zero(t, spies.usage.calls)
+				require.Zero(t, spies.user.deductCalls)
+				require.Zero(t, spies.subscription.incrementCalls)
+				return
+			}
+			require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+			require.JSONEq(t, `{"created":1710000021,"data":[]}`, rec.Body.String())
+			require.Equal(t, 1, spies.usage.calls)
+			require.NotNil(t, spies.usage.last)
+			require.Equal(t, 3, spies.usage.last.ImageCount)
+			require.Equal(t, 1, spies.user.deductCalls)
+			require.Zero(t, spies.subscription.incrementCalls)
+		})
+	}
+}
+
+func TestTokenHiveImagesProviderFailuresPreserveSourceBoundaryWithoutBilling(t *testing.T) {
+	tests := []struct {
+		name       string
+		mode       string
+		wantStatus int
+		wantType   string
+		wantCode   string
+		wantMsg    string
+	}{
+		{name: "error event", mode: "images_error_event", wantStatus: http.StatusBadRequest, wantType: "image_generation_user_error", wantCode: "moderation_blocked", wantMsg: "Your request was blocked by the safety system"},
+		{name: "response failed", mode: "images_response_failed", wantStatus: http.StatusBadRequest, wantType: "image_generation_user_error", wantCode: "moderation_blocked", wantMsg: "The safety system rejected this image"},
+		{name: "retryable incomplete", mode: "images_incomplete_retryable", wantStatus: http.StatusBadGateway, wantType: "incomplete_error", wantCode: "response_incomplete", wantMsg: "Upstream image generation incomplete: max_output_tokens"},
+		{name: "nonretryable incomplete", mode: "images_incomplete_policy", wantStatus: http.StatusBadRequest, wantType: "image_generation_user_error", wantCode: "response_incomplete", wantMsg: "Upstream image generation incomplete: content_filter"},
+		{name: "completed refusal", mode: "images_completed_refusal", wantStatus: http.StatusBadRequest, wantType: "image_generation_user_error", wantCode: "content_policy_violation", wantMsg: "This request conflicts with our image safety policy"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			h, spies := newTokenHiveUsagePolicyHandler(t, true, false, test.mode)
+			rec := runTokenHiveImagesUsagePolicyRequest(t, h)
+			require.Equal(t, test.wantStatus, rec.Code, "body=%s", rec.Body.String())
+			require.Equal(t, test.wantType, gjson.Get(rec.Body.String(), "error.type").String())
+			require.Equal(t, test.wantCode, gjson.Get(rec.Body.String(), "error.code").String())
+			require.Equal(t, test.wantMsg, gjson.Get(rec.Body.String(), "error.message").String())
+			require.Equal(t, 1, spies.upstream.callCount())
+			require.Zero(t, spies.usage.calls)
+			require.Zero(t, spies.user.deductCalls)
+			require.Zero(t, spies.subscription.incrementCalls)
+		})
+	}
 }
 
 func TestTokenHiveAuxiliaryHandlersApplyDedicatedSchedulerPolicy(t *testing.T) {
