@@ -94,6 +94,9 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
+		if handled, executionErr := s.handleTrustedTokenHiveExecutionErrorResponse(resp, c, account, respBody, policy); handled {
+			return nil, executionErr
+		}
 		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if policy.AllowAccountFailover && (s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) ||
 			isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode)) {

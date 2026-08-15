@@ -126,6 +126,11 @@ func (u *tokenHiveHandlerUpstream) Do(_ *http.Request, _ string, accountID int64
 		return tokenHiveHandlerImagesErrorResponse(http.StatusBadRequest, "image_generation_user_error", "response_incomplete", "Upstream image generation incomplete: content_filter"), nil
 	case "images_completed_refusal":
 		return tokenHiveHandlerImagesErrorResponse(http.StatusBadRequest, "image_generation_user_error", "content_policy_violation", "This request conflicts with our image safety policy"), nil
+	case "trusted_execution_error_response":
+		header := http.Header{"Content-Type": []string{"application/json"}}
+		header.Set("X-TokenHive-Execution-Error", "1")
+		return &http.Response{StatusCode: http.StatusBadGateway, Header: header,
+			Body: io.NopCloser(bytes.NewBufferString(`{"error":{"message":"proxy request failed HANDLER_EXECUTION_SECRET","source":"bee","type":"credential_unavailable"}}`))}, nil
 	case "images_stream_success":
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(
 			"data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\"}\n\n" +
@@ -427,6 +432,33 @@ func runTokenHiveAuxiliaryPolicyRequest(t *testing.T, h *OpenAIGatewayHandler, e
 	return rec
 }
 
+func runTokenHiveExecutionErrorRequest(t *testing.T, h *OpenAIGatewayHandler, endpoint string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupID := int64(91)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,
+		RateMultiplier: 1, SubscriptionType: service.SubscriptionTypeStandard, AllowMessagesDispatch: true}
+	user := &service.User{ID: 12, Balance: 100}
+	apiKey := &service.APIKey{ID: 11, UserID: user.ID, GroupID: &groupID, Group: group, User: user, Status: service.StatusActive}
+	body := `{"id":"search-fixture","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`
+	if endpoint == "/v1/messages/count_tokens" {
+		body = `{"model":"claude-opus-4-1","messages":[{"role":"user","content":"hello"}]}`
+	}
+	req := httptest.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+	if endpoint == "/v1/messages/count_tokens" {
+		h.CountTokens(c)
+	} else {
+		h.AlphaSearch(c)
+	}
+	return rec
+}
+
 func TestTokenHiveResponsePolicyPreventsSameAccountRetryAndFailover(t *testing.T) {
 	h, repo, upstream := newTokenHiveResponsePolicyHandler(t, true)
 	rec := runTokenHiveResponsePolicyRequest(t, h)
@@ -611,6 +643,25 @@ func TestTokenHiveImagesProviderFailuresPreserveSourceBoundaryWithoutBilling(t *
 			require.Equal(t, test.wantType, gjson.Get(rec.Body.String(), "error.type").String())
 			require.Equal(t, test.wantCode, gjson.Get(rec.Body.String(), "error.code").String())
 			require.Equal(t, test.wantMsg, gjson.Get(rec.Body.String(), "error.message").String())
+			require.Equal(t, 1, spies.upstream.callCount())
+			require.Zero(t, spies.usage.calls)
+			require.Zero(t, spies.user.deductCalls)
+			require.Zero(t, spies.subscription.incrementCalls)
+		})
+	}
+}
+
+func TestTokenHiveAuxiliaryHandlersPreserveTrustedExecutionErrorIdentity(t *testing.T) {
+	for _, endpoint := range []string{"/v1/alpha/search", "/v1/messages/count_tokens"} {
+		t.Run(endpoint, func(t *testing.T) {
+			h, spies := newTokenHiveUsagePolicyHandler(t, true, false, "trusted_execution_error_response")
+			rec := runTokenHiveExecutionErrorRequest(t, h, endpoint)
+
+			require.Equal(t, http.StatusBadGateway, rec.Code, "body=%s", rec.Body.String())
+			require.Equal(t, "bee", gjson.Get(rec.Body.String(), "error.source").String())
+			require.Equal(t, "credential_unavailable", gjson.Get(rec.Body.String(), "error.type").String())
+			require.Equal(t, "TokenHive execution failed", gjson.Get(rec.Body.String(), "error.message").String())
+			require.NotContains(t, rec.Body.String(), "HANDLER_EXECUTION_SECRET")
 			require.Equal(t, 1, spies.upstream.callCount())
 			require.Zero(t, spies.usage.calls)
 			require.Zero(t, spies.user.deductCalls)

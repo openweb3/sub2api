@@ -491,3 +491,73 @@ func TestIsOpenAIAlphaSearchEndpointUnsupported(t *testing.T) {
 	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(oauth, http.StatusNotFound))
 	require.False(t, isOpenAIAlphaSearchEndpointUnsupported(nil, http.StatusNotFound))
 }
+
+func TestForwardAlphaSearchTokenHiveExecutionErrorBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const executionBody = `{"error":{"message":"proxy request failed EXECUTION_MESSAGE_SECRET","source":"bee","type":"credential_unavailable"}}`
+	const providerBody = `{"error":{"message":"provider unavailable","type":"server_error"}}`
+	tests := []struct {
+		name        string
+		dedicated   bool
+		status      int
+		header      string
+		body        string
+		wantErr     string
+		wantBody    string
+		wantWritten bool
+	}{
+		{name: "trusted dedicated execution error", dedicated: true, status: http.StatusBadGateway, header: "1", body: executionBody, wantErr: "tokenhive execution error", wantBody: `{"error":{"message":"TokenHive execution failed","source":"bee","type":"credential_unavailable"}}`, wantWritten: true},
+		{name: "dedicated body lookalike without marker", dedicated: true, status: http.StatusBadGateway, body: executionBody, wantBody: executionBody, wantWritten: true},
+		{name: "dedicated marker with untrusted source", dedicated: true, status: http.StatusBadGateway, header: "1", body: `{"error":{"message":"provider supplied","source":"upstream","type":"credential_unavailable"}}`, wantBody: `{"error":{"message":"provider supplied","source":"upstream","type":"credential_unavailable"}}`, wantWritten: true},
+		{name: "ordinary account cannot trust marker", status: http.StatusBadGateway, header: "1", body: executionBody, wantErr: "failover", wantWritten: false},
+		{name: "dedicated provider 400 unchanged", dedicated: true, status: http.StatusBadRequest, body: providerBody, wantBody: providerBody, wantWritten: true},
+		{name: "dedicated provider 500 unchanged", dedicated: true, status: http.StatusInternalServerError, body: providerBody, wantBody: providerBody, wantWritten: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := []byte(`{"id":"search-session","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("api_key", &APIKey{ID: 707})
+			account := &Account{ID: 61, Name: "alpha-boundary", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Status: StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "upstream-auth-secret", "base_url": "https://relay.example"}}
+			cfg := &config.Config{}
+			var registry *TokenHiveRegistry
+			if test.dedicated {
+				cfg.TokenHive = tokenHiveConfigForTest(account.ID)
+				var err error
+				registry, err = NewTokenHiveRegistry(cfg.TokenHive, []Account{*account})
+				require.NoError(t, err)
+			}
+			header := http.Header{"Content-Type": []string{"application/json"}}
+			if test.header != "" {
+				header.Set("X-TokenHive-Execution-Error", test.header)
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: test.status, Header: header, Body: io.NopCloser(strings.NewReader(test.body))}}
+			svc := &OpenAIGatewayService{cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream}
+
+			result, err := svc.ForwardAlphaSearch(context.Background(), c, account, body)
+
+			require.Nil(t, result)
+			require.Len(t, upstream.requests, 1)
+			if test.wantErr == "failover" {
+				var failoverErr *UpstreamFailoverError
+				require.ErrorAs(t, err, &failoverErr)
+			} else if test.wantErr != "" {
+				require.ErrorContains(t, err, test.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, test.wantWritten, c.Writer.Written())
+			if test.wantWritten {
+				require.Equal(t, test.status, recorder.Code)
+				require.JSONEq(t, test.wantBody, recorder.Body.String())
+			}
+			if test.wantErr != "" {
+				require.NotContains(t, recorder.Body.String(), "EXECUTION_MESSAGE_SECRET")
+			}
+		})
+	}
+}

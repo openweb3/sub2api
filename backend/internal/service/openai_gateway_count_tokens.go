@@ -146,6 +146,9 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	}
 
 	if resp.StatusCode >= 400 {
+		if handled, executionErr := s.handleTrustedTokenHiveExecutionErrorResponse(resp, c, account, respBody, policy); handled {
+			return executionErr
+		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
 		if (account.Type == AccountTypeOAuth || tokenHiveAccount != nil) && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
 			writeOpenAIOAuthInputTokensFallback(c, account, prepared, resp.StatusCode)

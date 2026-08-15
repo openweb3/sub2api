@@ -338,22 +338,8 @@ func (s *OpenAIGatewayService) handleErrorResponseWithPolicy(
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
-	if source, code, ok := trustedTokenHiveExecutionError(resp, body); policy.Dedicated && ok {
-		const clientMessage = "TokenHive execution failed"
-		setOpsUpstreamError(c, 0, clientMessage, "")
-		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
-			Platform:    account.Platform,
-			AccountID:   account.ID,
-			AccountName: account.Name,
-			Kind:        "request_error",
-			Stage:       "tokenhive_execution",
-			Scope:       source,
-			Reason:      code,
-			Message:     clientMessage,
-		})
-		MarkResponseCommitted(c)
-		c.JSON(resp.StatusCode, gin.H{"error": gin.H{"message": clientMessage, "source": source, "type": code}})
-		return nil, fmt.Errorf("tokenhive execution error: source=%s code=%s", source, code)
+	if handled, err := s.handleTrustedTokenHiveExecutionErrorResponse(resp, c, account, body, policy); handled {
+		return nil, err
 	}
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
@@ -562,6 +548,35 @@ func (s *OpenAIGatewayService) handleErrorResponseWithPolicy(
 		return nil, fmt.Errorf("upstream error: %d", resp.StatusCode)
 	}
 	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
+}
+
+func (s *OpenAIGatewayService) handleTrustedTokenHiveExecutionErrorResponse(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	policy TokenHiveResponsePolicy,
+) (bool, error) {
+	source, code, ok := trustedTokenHiveExecutionError(resp, body)
+	if !policy.Dedicated || !ok {
+		return false, nil
+	}
+
+	const clientMessage = "TokenHive execution failed"
+	setOpsUpstreamError(c, 0, clientMessage, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:    account.Platform,
+		AccountID:   account.ID,
+		AccountName: account.Name,
+		Kind:        "request_error",
+		Stage:       "tokenhive_execution",
+		Scope:       source,
+		Reason:      code,
+		Message:     clientMessage,
+	})
+	MarkResponseCommitted(c)
+	c.JSON(resp.StatusCode, gin.H{"error": gin.H{"message": clientMessage, "source": source, "type": code}})
+	return true, fmt.Errorf("tokenhive execution error: source=%s code=%s", source, code)
 }
 
 func trustedTokenHiveExecutionError(resp *http.Response, body []byte) (string, string, bool) {
