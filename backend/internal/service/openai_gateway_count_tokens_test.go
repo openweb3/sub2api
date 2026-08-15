@@ -119,6 +119,11 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPl
 			body:       `{"error":{"type":"invalid_request_error","code":"missing_scope","message":"You have insufficient permissions for this operation. Missing scopes: api.responses.write."}}`,
 		},
 		{
+			name:       "401_input_tokens_unsupported_authentication_envelope",
+			statusCode: http.StatusUnauthorized,
+			body:       `{"error":{"type":"authentication_error","code":"invalid_api_key","message":"input_tokens unsupported"}}`,
+		},
+		{
 			name:       "403_missing_responses_write_scope",
 			statusCode: http.StatusForbidden,
 			body:       `{"error":{"type":"invalid_request_error","code":"missing_scope","message":"Missing scopes: api.responses.write"}}`,
@@ -155,6 +160,7 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPl
 			require.Equal(t, http.StatusOK, rec.Code)
 			require.JSONEq(t, `{"input_tokens":`+strconv.Itoa(expectedEstimate)+`}`, rec.Body.String())
 			require.NotNil(t, upstream.lastReq)
+			require.Len(t, upstream.requests, 1, "local fallback must follow exactly one upstream request")
 			require.Equal(t, "https://api.openai.com/v1/responses/input_tokens", upstream.lastReq.URL.String())
 			require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("authorization"))
 			require.Empty(t, upstream.lastReq.Header.Get("Chatgpt-Account-Id"))

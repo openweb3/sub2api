@@ -28,6 +28,24 @@ type tokenHiveHandlerAccountRepo struct {
 	selections int
 }
 
+type tokenHiveHandlerSchedulerSettingRepo struct {
+	service.SettingRepository
+}
+
+func (tokenHiveHandlerSchedulerSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if key == "openai_advanced_scheduler_enabled" {
+			values[key] = "true"
+		}
+	}
+	return values, nil
+}
+
+func (tokenHiveHandlerSchedulerSettingRepo) SetMultiple(context.Context, map[string]string) error {
+	return nil
+}
+
 func (r *tokenHiveHandlerAccountRepo) ListSchedulableByGroupIDAndPlatform(context.Context, int64, string) ([]service.Account, error) {
 	return r.listAccounts(), nil
 }
@@ -93,6 +111,21 @@ func (u *tokenHiveHandlerUpstream) Do(_ *http.Request, _ string, accountID int64
 	u.account = append(u.account, accountID)
 	u.mu.Unlock()
 	switch u.mode {
+	case "images_empty":
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(`{"created":1710000021,"data":[]}`))}, nil
+	case "images_stream_success":
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\"}\n\n" +
+				"data: {\"type\":\"image_generation.completed\",\"b64_json\":\"ZmluYWw=\",\"usage\":{\"images\":1}}\n\n"))}, nil
+	case "images_transport_error", "alpha_transport_error":
+		return nil, errors.New("fixture auxiliary transport failure")
+	case "alpha_success":
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(`{"output":"fixture alpha result"}`))}, nil
+	case "alpha_500":
+		return &http.Response{StatusCode: http.StatusInternalServerError, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(`{"error":{"type":"server_error","message":"temporary alpha failure"}}`))}, nil
 	case "completed_then_read_error":
 		body := strings.Join([]string{
 			`data: {"type":"response.output_text.delta","delta":"ok"}`,
@@ -215,7 +248,7 @@ func newTokenHiveResponsePolicyHandler(t *testing.T, dedicated bool) (*OpenAIGat
 	return newTokenHiveResponsePolicyHandlerWithUpstream(t, dedicated, &tokenHiveHandlerUpstream{})
 }
 
-func newTokenHiveResponsePolicyHandlerWithUpstream(t *testing.T, dedicated bool, upstream *tokenHiveHandlerUpstream) (*OpenAIGatewayHandler, *tokenHiveHandlerAccountRepo, *tokenHiveHandlerUpstream) {
+func newTokenHiveResponsePolicyHandlerWithUpstream(t *testing.T, dedicated bool, upstream *tokenHiveHandlerUpstream, schedulerEnabled ...bool) (*OpenAIGatewayHandler, *tokenHiveHandlerAccountRepo, *tokenHiveHandlerUpstream) {
 	t.Helper()
 	accounts := []service.Account{
 		{ID: 1, Name: "first", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Priority: 0,
@@ -233,7 +266,17 @@ func newTokenHiveResponsePolicyHandlerWithUpstream(t *testing.T, dedicated bool,
 		}
 	}
 	repo := &tokenHiveHandlerAccountRepo{accounts: accounts}
-	gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, nil, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
+	var rateLimits *service.RateLimitService
+	if len(schedulerEnabled) > 0 && schedulerEnabled[0] {
+		settings := service.NewSettingService(tokenHiveHandlerSchedulerSettingRepo{}, cfg)
+		require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{OpenAIAdvancedSchedulerEnabled: true}))
+		t.Cleanup(func() {
+			require.NoError(t, settings.UpdateSettings(context.Background(), &service.SystemSettings{}))
+		})
+		rateLimits = service.NewRateLimitService(repo, nil, cfg, nil, nil)
+		rateLimits.SetSettingService(settings)
+	}
+	gateway := service.NewOpenAIGatewayService(repo, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil, rateLimits, nil, upstream, nil, nil, nil, nil, nil, nil, nil, nil)
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing, service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg), nil, nil, nil, nil, cfg)
@@ -317,6 +360,52 @@ func runTokenHiveUsagePolicyRequest(t *testing.T, h *OpenAIGatewayHandler, subsc
 		})
 	}
 	h.Responses(c)
+	return rec
+}
+
+func runTokenHiveImagesUsagePolicyRequest(t *testing.T, h *OpenAIGatewayHandler) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupID := int64(91)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,
+		RateMultiplier: 1, SubscriptionType: service.SubscriptionTypeStandard, AllowImageGeneration: true}
+	user := &service.User{ID: 12, Balance: 100}
+	apiKey := &service.APIKey{ID: 11, UserID: user.ID, GroupID: &groupID, Group: group, User: user, Status: service.StatusActive}
+	req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewBufferString(`{"model":"gpt-image-2","prompt":"draw a cat","n":3,"response_format":"b64_json"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+	h.Images(c)
+	return rec
+}
+
+func runTokenHiveAuxiliaryPolicyRequest(t *testing.T, h *OpenAIGatewayHandler, endpoint string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupID := int64(91)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true,
+		RateMultiplier: 1, SubscriptionType: service.SubscriptionTypeStandard, AllowImageGeneration: true}
+	user := &service.User{ID: 12, Balance: 100}
+	apiKey := &service.APIKey{ID: 11, UserID: user.ID, GroupID: &groupID, Group: group, User: user, Status: service.StatusActive}
+	body := `{"id":"search-fixture","model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`
+	if endpoint == "/v1/images/generations" {
+		body = `{"model":"gpt-image-2","prompt":"draw a cat","stream":true,"response_format":"b64_json"}`
+	}
+	req := httptest.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+	if endpoint == "/v1/images/generations" {
+		h.Images(c)
+	} else {
+		h.AlphaSearch(c)
+	}
 	return rec
 }
 
@@ -447,6 +536,59 @@ func TestTokenHiveResponsePolicyPreservesResponseFailedBillingSemantics(t *testi
 				require.Equal(t, http.StatusOK, rec.Code)
 				require.Equal(t, "text/event-stream", rec.Header().Get("Content-Type"))
 				require.Equal(t, failedSSE, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestTokenHiveImagesZeroOutputDoesNotRecordSuccessfulUsageOrBillRequestedN(t *testing.T) {
+	h, spies := newTokenHiveUsagePolicyHandler(t, true, false, "images_empty")
+	rec := runTokenHiveImagesUsagePolicyRequest(t, h)
+
+	require.Equal(t, http.StatusBadGateway, rec.Code, "body=%s", rec.Body.String())
+	require.Equal(t, 1, spies.upstream.callCount())
+	require.Zero(t, spies.usage.calls)
+	require.Zero(t, spies.user.deductCalls)
+	require.Zero(t, spies.subscription.incrementCalls)
+}
+
+func TestTokenHiveAuxiliaryHandlersApplyDedicatedSchedulerPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		mode     string
+	}{
+		{name: "images success with TTFT", endpoint: "/v1/images/generations", mode: "images_stream_success"},
+		{name: "images failure", endpoint: "/v1/images/generations", mode: "images_transport_error"},
+		{name: "alpha success", endpoint: "/v1/alpha/search", mode: "alpha_success"},
+		{name: "alpha failure", endpoint: "/v1/alpha/search", mode: "alpha_transport_error"},
+		{name: "alpha failover stimulus", endpoint: "/v1/alpha/search", mode: "alpha_500"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, dedicated := range []bool{true, false} {
+				policyName := "ordinary"
+				if dedicated {
+					policyName = "dedicated"
+				}
+				t.Run(policyName, func(t *testing.T) {
+					upstream := &tokenHiveHandlerUpstream{mode: test.mode}
+					h, repo, _ := newTokenHiveResponsePolicyHandlerWithUpstream(t, dedicated, upstream, true)
+					if dedicated {
+						repo.accounts = repo.accounts[:1]
+					}
+					_ = runTokenHiveAuxiliaryPolicyRequest(t, h, test.endpoint)
+					metrics := h.gatewayService.SnapshotOpenAIAccountSchedulerMetrics()
+					if dedicated {
+						require.Zero(t, metrics.RuntimeStatsAccountCount)
+						require.Zero(t, metrics.AccountSwitchTotal)
+						return
+					}
+					require.Greater(t, metrics.RuntimeStatsAccountCount, 0)
+					if test.mode == "alpha_500" {
+						require.Greater(t, metrics.AccountSwitchTotal, int64(0))
+					}
+				})
 			}
 		})
 	}
