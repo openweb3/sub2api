@@ -214,18 +214,26 @@ func TestTokenHiveProvenance_ExtractUpstreamErrorMessageInnerJSONFirstCompleteMe
 	tests := []struct {
 		name  string
 		inner string
+		want  string
 	}{
-		{name: "trailing complete text", inner: `{"error":{"message":"first"}} trailing text`},
-		{name: "duplicate error key", inner: `{"error":{"message":"first"},"error":{"message":"second"}}`},
-		{name: "invalid suffix after message", inner: `{"error":{"message":"first" garbage}}`},
-		{name: "truncated parent object", inner: `{"error":{"message":"first"}`},
+		{name: "trailing complete text", inner: `{"error":{"message":"first"}} trailing text`, want: "first"},
+		{name: "duplicate error key", inner: `{"error":{"message":"first"},"error":{"message":"second"}}`, want: "first"},
+		{name: "invalid suffix after message", inner: `{"error":{"message":"first" garbage}}`, want: "first"},
+		{name: "truncated parent object", inner: `{"error":{"message":"first"}`, want: "first"},
+		{name: "later matching error skips scalar", inner: `{"error":7,"error":{"message":"safe"}}`, want: "safe"},
+		{name: "later matching error skips object without message", inner: `{"error":{"other":1},"error":{"message":"safe"}}`, want: "safe"},
+		{name: "invalid top level field before error", inner: `{"before":INVALID,"error":{"message":"safe"}}`, want: "safe"},
+		{name: "invalid error field before message", inner: `{"error":{"before":INVALID,"message":"safe"}}`, want: "safe"},
+		{name: "invalid message object stays field scoped", inner: `{"error":{"message":{"safe":INVALID}}}`, want: `{"safe":INVALID}`},
+		{name: "invalid message array stays field scoped", inner: `{"error":{"message":[1,INVALID]}}`, want: `[1,INVALID]`},
+		{name: "mismatched message array stays field scoped", inner: `{"error":{"message":[1,2}`, want: `[1,2}`},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			body, err := json.Marshal(map[string]any{"error": map[string]any{"message": tt.inner}})
 			require.NoError(t, err)
-			require.Equal(t, "first", extractUpstreamErrorMessage(body))
+			require.Equal(t, tt.want, extractUpstreamErrorMessage(body))
 		})
 	}
 }
