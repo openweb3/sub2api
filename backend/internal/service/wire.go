@@ -45,6 +45,49 @@ func ProvideTokenHiveRegistry(cfg *config.Config, accountRepo AccountRepository)
 	return NewTokenHiveRegistry(cfg.TokenHive, accounts)
 }
 
+func ProvideGatewayService(
+	tokenHiveRegistry *TokenHiveRegistry,
+	accountRepo AccountRepository,
+	groupRepo GroupRepository,
+	usageLogRepo UsageLogRepository,
+	usageBillingRepo UsageBillingRepository,
+	userRepo UserRepository,
+	userSubRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	cache GatewayCache,
+	cfg *config.Config,
+	schedulerSnapshot *SchedulerSnapshotService,
+	concurrencyService *ConcurrencyService,
+	billingService *BillingService,
+	rateLimitService *RateLimitService,
+	billingCacheService *BillingCacheService,
+	identityService *IdentityService,
+	httpUpstream HTTPUpstream,
+	deferredService *DeferredService,
+	claudeTokenProvider *ClaudeTokenProvider,
+	sessionLimitCache SessionLimitCache,
+	rpmCache RPMCache,
+	digestStore *DigestSessionStore,
+	settingService *SettingService,
+	tlsFPProfileService *TLSFingerprintProfileService,
+	channelService *ChannelService,
+	resolver *ModelPricingResolver,
+	compositeResolver *CompositeRouteResolver,
+	balanceNotifyService *BalanceNotifyService,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
+) *GatewayService {
+	svc := NewGatewayService(
+		accountRepo, groupRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo,
+		userGroupRateRepo, cache, cfg, schedulerSnapshot, concurrencyService, billingService,
+		rateLimitService, billingCacheService, identityService, httpUpstream, deferredService,
+		claudeTokenProvider, sessionLimitCache, rpmCache, digestStore, settingService,
+		tlsFPProfileService, channelService, resolver, compositeResolver, balanceNotifyService,
+		userPlatformQuotaRepo,
+	)
+	svc.tokenHiveRegistry = tokenHiveRegistry
+	return svc
+}
+
 func ProvideOpenAIGatewayService(
 	tokenHiveRegistry *TokenHiveRegistry,
 	accountRepo AccountRepository,
@@ -759,7 +802,7 @@ var ProviderSet = wire.NewSet(
 	ProvideBillingCacheService,
 	NewAnnouncementService,
 	NewAdminService,
-	NewGatewayService,
+	ProvideGatewayService,
 	ProvideTokenHiveRegistry,
 	ProvideOpenAIGatewayService,
 	ProvideImageStorageSettingService,

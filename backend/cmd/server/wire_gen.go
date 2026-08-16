@@ -97,6 +97,10 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	usageLogRepository := repository.NewUsageLogRepository(client, db)
 	usageService := service.NewUsageService(usageLogRepository, userRepository, client, apiKeyAuthCacheInvalidator)
 	opsRepository := repository.NewOpsRepository(db)
+	tokenHiveRegistry, err := service.ProvideTokenHiveRegistry(configConfig, accountRepository)
+	if err != nil {
+		return nil, err
+	}
 	usageBillingRepository := repository.NewUsageBillingRepository(client, db)
 	gatewayCache := repository.NewGatewayCache(redisClient)
 	schedulerOutboxRepository := repository.NewSchedulerOutboxRepository(db)
@@ -139,11 +143,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	compositeRouteResolver := service.NewCompositeRouteResolver(compositeModelRouteRepository)
 	notificationEmailService := service.NewNotificationEmailService(settingRepository, emailService)
 	balanceNotifyService := service.ProvideBalanceNotifyService(emailService, settingRepository, accountRepository, notificationEmailService)
-	gatewayService := service.NewGatewayService(accountRepository, groupRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, identityService, httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestSessionStore, settingService, tlsFingerprintProfileService, channelService, modelPricingResolver, compositeRouteResolver, balanceNotifyService, serviceUserPlatformQuotaRepository)
-	tokenHiveRegistry, err := service.ProvideTokenHiveRegistry(configConfig, accountRepository)
-	if err != nil {
-		return nil, err
-	}
+	gatewayService := service.ProvideGatewayService(tokenHiveRegistry, accountRepository, groupRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, identityService, httpUpstream, deferredService, claudeTokenProvider, sessionLimitCache, rpmCache, digestSessionStore, settingService, tlsFingerprintProfileService, channelService, modelPricingResolver, compositeRouteResolver, balanceNotifyService, serviceUserPlatformQuotaRepository)
 	openAIOAuthClient := repository.NewOpenAIOAuthClient()
 	privacyClientFactory := providePrivacyClientFactory()
 	openAIOAuthService := service.ProvideOpenAIOAuthService(proxyRepository, openAIOAuthClient, privacyClientFactory)

@@ -110,7 +110,15 @@ type TokenHiveConfig struct {
 	Accounts      map[int64]string `mapstructure:"accounts"`
 }
 
-const tokenHiveOpenAICodexOAuthUpstreamType = "openai_codex_oauth"
+const (
+	tokenHiveOpenAICodexOAuthUpstreamType = "openai_codex_oauth"
+	tokenHiveAnthropicOAuthUpstreamType   = "anthropic_oauth"
+)
+
+var tokenHiveSupportedUpstreamTypes = map[string]struct{}{
+	tokenHiveOpenAICodexOAuthUpstreamType: {},
+	tokenHiveAnthropicOAuthUpstreamType:   {},
+}
 
 func DecodeTokenHiveTenantHMACKey(encoded string) ([]byte, error) {
 	encoded = strings.TrimSpace(encoded)
@@ -175,7 +183,7 @@ func validateTokenHiveConfig(cfg TokenHiveConfig) error {
 		if strings.TrimSpace(upstreamType) == "" {
 			return fmt.Errorf("tokenhive.accounts upstream type must not be empty")
 		}
-		if upstreamType != tokenHiveOpenAICodexOAuthUpstreamType {
+		if _, supported := tokenHiveSupportedUpstreamTypes[upstreamType]; !supported {
 			return fmt.Errorf("tokenhive.accounts[%d] unsupported upstream type %q", accountID, upstreamType)
 		}
 		if previousID, exists := seenTypes[upstreamType]; exists {

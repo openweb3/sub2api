@@ -25,6 +25,12 @@ func tokenHiveConfigForTest(accountID int64) config.TokenHiveConfig {
 	}
 }
 
+func tokenHiveAnthropicConfigForTest(accountID int64) config.TokenHiveConfig {
+	cfg := tokenHiveConfigForTest(accountID)
+	cfg.Accounts[accountID] = UpstreamTypeAnthropicOAuth
+	return cfg
+}
+
 func TestTokenHiveHandoffCarriesLogicalMethodAndForcesLoopbackPOST(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		t.Run(method, func(t *testing.T) {
@@ -62,6 +68,50 @@ func TestTokenHiveConfigRejectsInvalidRegistry(t *testing.T) {
 				t.Fatal("NewTokenHiveRegistry() error = nil")
 			}
 		})
+	}
+}
+
+func TestTokenHiveAnthropicRegistryRequiresOneAPIKeyVirtualAccount(t *testing.T) {
+	cfg := tokenHiveAnthropicConfigForTest(42)
+	tests := []struct {
+		name     string
+		accounts []Account
+	}{
+		{name: "mapped account missing"},
+		{name: "mapped account is oauth", accounts: []Account{{ID: 42, Type: AccountTypeOAuth, Platform: PlatformAnthropic}}},
+		{name: "mapped account is setup", accounts: []Account{{ID: 42, Type: AccountTypeSetupToken, Platform: PlatformAnthropic}}},
+		{name: "mapped account is openai", accounts: []Account{{ID: 42, Type: AccountTypeAPIKey, Platform: PlatformOpenAI}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := NewTokenHiveRegistry(cfg, tt.accounts); err == nil {
+				t.Fatal("NewTokenHiveRegistry() error = nil")
+			}
+		})
+	}
+
+	registry, err := NewTokenHiveRegistry(cfg, []Account{{ID: 42, Type: AccountTypeAPIKey, Platform: PlatformAnthropic}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapped, ok := registry.Match(&Account{ID: 42, Type: AccountTypeAPIKey, Platform: PlatformAnthropic}); !ok || mapped.UpstreamType != UpstreamTypeAnthropicOAuth {
+		t.Fatalf("Match() = %#v, %v", mapped, ok)
+	}
+	if _, ok := registry.Match(&Account{ID: 42, Type: AccountTypeAPIKey, Platform: PlatformOpenAI}); ok {
+		t.Fatal("registry matched wrong platform")
+	}
+}
+
+func TestAnthropicGatewayTokenHivePolicyDoesNotChangeOpenAIAccounts(t *testing.T) {
+	cfg := tokenHiveConfigForTest(42)
+	account := &Account{ID: 42, Type: AccountTypeAPIKey, Platform: PlatformOpenAI}
+	registry, err := NewTokenHiveRegistry(cfg, []Account{*account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := (&GatewayService{cfg: &config.Config{TokenHive: cfg}, tokenHiveRegistry: registry}).ResolveTokenHiveResponsePolicy(account)
+	if policy.Dedicated || !policy.AllowSameAccountRetry || !policy.AllowAccountFailover || !policy.AllowAccountMutation || !policy.AllowRuntimeBlock || !policy.AllowSchedulerFeedback {
+		t.Fatalf("GatewayService policy changed OpenAI behavior: %#v", policy)
 	}
 }
 

@@ -60,3 +60,32 @@ func TestTokenHiveConfigAcceptsSingleCodexMapping(t *testing.T) {
 		t.Fatalf("validateTokenHiveConfig() error = %v", err)
 	}
 }
+
+func TestTokenHiveConfigAcceptsAnthropicOAuthAlongsideCodex(t *testing.T) {
+	cfg := validTokenHiveConfigForTest()
+	cfg.Accounts[43] = "anthropic_oauth"
+	if err := validateTokenHiveConfig(cfg); err != nil {
+		t.Fatalf("validateTokenHiveConfig() error = %v", err)
+	}
+}
+
+func TestTokenHiveConfigRejectsInvalidAnthropicRegistry(t *testing.T) {
+	tests := []struct {
+		name     string
+		accounts map[int64]string
+	}{
+		{name: "duplicate anthropic upstream type", accounts: map[int64]string{42: "anthropic_oauth", 43: "anthropic_oauth"}},
+		{name: "anthropic capability used as upstream type", accounts: map[int64]string{42: "anthropic.oauth.messages.create"}},
+		{name: "setup token upstream is excluded", accounts: map[int64]string{42: "anthropic_setup_token"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := validTokenHiveConfigForTest()
+			cfg.Accounts = tt.accounts
+			if err := validateTokenHiveConfig(cfg); err == nil {
+				t.Fatal("validateTokenHiveConfig() error = nil")
+			}
+		})
+	}
+}

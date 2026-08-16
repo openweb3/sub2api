@@ -841,6 +841,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				return
 			}
 			attemptBody := attemptParsedReq.Body.Bytes()
+			responsePolicy := h.gatewayService.ResolveTokenHiveResponsePolicy(account)
 
 			// 转发请求 - 根据账号平台分流
 			c.Set("parsed_request", attemptParsedReq)
@@ -985,8 +986,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 					return
 				}
-				var failoverErr *service.UpstreamFailoverError
-				if errors.As(err, &failoverErr) {
+				if failoverErr, allowFailover := gatewayFailoverForPolicy(err, responsePolicy); allowFailover {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
@@ -1040,7 +1040,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+			if responsePolicy.AllowAccountMutation && account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
 				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -1051,7 +1051,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 选中账号与粘性账号一致：刷新 TTL
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
-			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
+			if responsePolicy.AllowSchedulerFeedback && sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
 				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -1905,6 +1905,17 @@ func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForw
 		return false
 	}
 	return !strings.Contains(contentType, "text/event-stream")
+}
+
+func gatewayFailoverForPolicy(err error, policy service.TokenHiveResponsePolicy) (*service.UpstreamFailoverError, bool) {
+	if err == nil || !policy.AllowAccountFailover {
+		return nil, false
+	}
+	var failoverErr *service.UpstreamFailoverError
+	if !errors.As(err, &failoverErr) {
+		return nil, false
+	}
+	return failoverErr, true
 }
 
 // checkClaudeCodeVersion 检查 Claude Code 客户端版本是否满足版本要求

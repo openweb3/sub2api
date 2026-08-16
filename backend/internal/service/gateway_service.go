@@ -695,6 +695,7 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
+	tokenHiveRegistry     *TokenHiveRegistry
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
 	usageLogRepo          UsageLogRepository
@@ -892,12 +893,26 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
 }
 
+func (s *GatewayService) refreshGatewayStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil || !s.allowAnthropicSchedulerFeedback(accountID) {
+		return nil
+	}
+	return s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
+}
+
+func (s *GatewayService) deleteGatewayStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil || !s.allowAnthropicSchedulerFeedback(accountID) {
+		return nil
+	}
+	return s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+}
+
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky
 // behavior unless a profit gate is installed. Profit-controlled requests bind
 // only after the terminal post-slot check, otherwise a rejected candidate could
 // overwrite a healthy pre-existing sticky binding.
 func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if gatewayProfitControlGateActive(ctx) {
+	if gatewayProfitControlGateActive(ctx) || !s.allowAnthropicSchedulerFeedback(accountID) {
 		return nil
 	}
 	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
@@ -910,7 +925,7 @@ func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Con
 // account remains bound and automatically becomes eligible again if its
 // account rate recovers.
 func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil || !s.allowAnthropicSchedulerFeedback(accountID) {
 		return nil
 	}
 	if !gatewayProfitControlGateActive(ctx) {
