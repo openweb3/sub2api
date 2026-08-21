@@ -246,6 +246,9 @@ func (s *OpenAIGatewayService) CreateLiveCall(
 }
 
 func (s *OpenAIGatewayService) shouldFailoverLiveCreateError(err error) bool {
+	if errors.Is(err, errTokenHiveV1UnsupportedTransport) {
+		return false
+	}
 	var upstreamErr *UpstreamFailoverError
 	if !errors.As(err, &upstreamErr) {
 		// 凭证读取和网络传输错误都可能只影响当前账号或代理。
@@ -264,6 +267,9 @@ func (s *OpenAIGatewayService) createUpstreamLiveCall(
 	request *LiveCallRequest,
 	attestation string,
 ) (*LiveCallCreated, error) {
+	if err := s.rejectTokenHiveV1Transport(ctx, account, "Live"); err != nil {
+		return nil, err
+	}
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
 		logLiveCreateStageFailure(ctx, account.ID, "access_token", err)

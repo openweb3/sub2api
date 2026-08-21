@@ -46,6 +46,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	if err := s.rejectTokenHiveV1Transport(ctx, account, "Responses WebSocket"); err != nil {
+		return err
+	}
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}

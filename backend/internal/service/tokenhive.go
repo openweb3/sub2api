@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 const (
@@ -50,8 +52,9 @@ var tokenHiveUpstreamPlatforms = map[string]string{
 }
 
 var (
-	errInvalidSourceOperation = errors.New("invalid tokenhive source operation")
-	tokenHiveSourceOperations = map[string]struct{}{
+	errInvalidSourceOperation          = errors.New("invalid tokenhive source operation")
+	errTokenHiveV1UnsupportedTransport = errors.New("tokenhive v1 unsupported transport")
+	tokenHiveSourceOperations          = map[string]struct{}{
 		SourceOperationAnthropicMessagesCreate:      {},
 		SourceOperationAnthropicMessagesStream:      {},
 		SourceOperationAnthropicMessagesCountTokens: {},
@@ -64,6 +67,22 @@ var (
 		SourceOperationOpenAICodexModelsManifest:    {},
 	}
 )
+
+func (s *OpenAIGatewayService) rejectTokenHiveV1Transport(ctx context.Context, account *Account, transport string) error {
+	mapped, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return fmt.Errorf("resolve tokenhive account for v1 transport: %w", err)
+	}
+	if mapped == nil {
+		return nil
+	}
+	logger.FromContext(ctx).Warn(
+		"TokenHive v1 transport rejected",
+		zap.Int64("account_id", account.ID),
+		zap.String("transport", transport),
+	)
+	return fmt.Errorf("%w: TokenHive v1 does not support %s", errTokenHiveV1UnsupportedTransport, transport)
+}
 
 type TokenHiveAccount struct {
 	AccountID    int64
