@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/gin-gonic/gin"
 )
 
@@ -545,5 +547,171 @@ func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
 				t.Fatalf("proxy URL = %q, upstream calls = %d, want direct and one", upstream.lastProxyURL, len(upstream.requests))
 			}
 		})
+	}
+}
+
+func TestTokenHiveMappedCompatibilityForceChatCompletionsUsesCanonicalHandoff(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	account := &Account{
+		ID: 42, Name: "mapped-force-chat", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "mapped-fixture-key", "base_url": "https://api.openai.com"},
+		Extra: map[string]any{
+			openai_compat.ExtraKeyResponsesMode: string(openai_compat.ResponsesSupportModeForceChatCompletions),
+		},
+		Status: StatusActive, Schedulable: true,
+	}
+	tokenHiveCfg := tokenHiveConfigForTest(account.ID)
+	registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newService := func(upstream *handoffRecorder) *OpenAIGatewayService {
+		cfg := &config.Config{TokenHive: tokenHiveCfg}
+		return &OpenAIGatewayService{cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
+	}
+	newContext := func(path string, body []byte) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Set("api_key", &APIKey{ID: 707})
+		return c
+	}
+
+	tests := []struct {
+		name   string
+		path   string
+		body   []byte
+		invoke func(*OpenAIGatewayService, *gin.Context, []byte)
+	}{
+		{
+			name: "chat completions",
+			path: "/v1/chat/completions",
+			body: []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}]}`),
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, body []byte) {
+				_, _ = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+			},
+		},
+		{
+			name: "messages",
+			path: "/v1/messages",
+			body: []byte(`{"model":"gpt-5.4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`),
+			invoke: func(svc *OpenAIGatewayService, c *gin.Context, body []byte) {
+				_, _ = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &handoffRecorder{}
+			upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+			tt.invoke(newService(upstream), newContext(tt.path, tt.body), tt.body)
+			assertSingleTokenHiveCanonicalRequest(t, upstream, tokenHiveCfg.ProxyURL, SourceOperationOpenAIResponsesHTTP)
+		})
+	}
+}
+
+func TestTokenHiveMappedChatCompletionsUnknownResponsesErrorDoesNotRawRetry(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	account := &Account{
+		ID: 42, Name: "mapped-unknown", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "mapped-fixture-key", "base_url": "https://api.openai.com"},
+		Status:      StatusActive, Schedulable: true,
+	}
+	tokenHiveCfg := tokenHiveConfigForTest(account.ID)
+	registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &handoffRecorder{httpUpstreamRecorder: httpUpstreamRecorder{responses: []*http.Response{
+		{
+			StatusCode: http.StatusNotFound,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"responses unsupported"}}`)),
+		},
+		{
+			StatusCode: http.StatusTeapot,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"raw retry captured"}}`)),
+		},
+	}}}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 707})
+	cfg := &config.Config{TokenHive: tokenHiveCfg}
+	svc := &OpenAIGatewayService{cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
+
+	_, _ = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+
+	assertSingleTokenHiveCanonicalRequest(t, upstream, tokenHiveCfg.ProxyURL, SourceOperationOpenAIResponsesHTTP)
+}
+
+func TestTokenHiveMappedPATShapedAlphaSearchUsesCanonicalOperation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var whoamiCalls int32
+	whoamiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&whoamiCalls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"chatgpt_account_id":"unexpected-preflight"}`))
+	}))
+	defer whoamiServer.Close()
+	oldWhoamiURL := openAICodexPATWhoamiURL
+	openAICodexPATWhoamiURL = whoamiServer.URL
+	defer func() { openAICodexPATWhoamiURL = oldWhoamiURL }()
+
+	account := &Account{
+		ID: 42, Name: "mapped-pat-shaped", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":   "at-mapped-fixture-token",
+			"auth_mode": OpenAIAuthModePersonalAccessToken,
+			"base_url":  "https://api.openai.com",
+		},
+		Status: StatusActive, Schedulable: true,
+	}
+	tokenHiveCfg := tokenHiveConfigForTest(account.ID)
+	registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstream := &handoffRecorder{}
+	upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	body := []byte(`{"model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search?feature=standalone", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set("api_key", &APIKey{ID: 707})
+	cfg := &config.Config{TokenHive: tokenHiveCfg}
+	svc := &OpenAIGatewayService{
+		cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream,
+		openAITokenProvider:  NewOpenAITokenProvider(nil, nil, NewOpenAIOAuthService(nil, nil)),
+		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+	}
+
+	_, _ = svc.ForwardAlphaSearch(context.Background(), c, account, body)
+
+	assertSingleTokenHiveCanonicalRequest(t, upstream, tokenHiveCfg.ProxyURL, SourceOperationOpenAIAlphaSearch)
+	if got := atomic.LoadInt32(&whoamiCalls); got != 0 {
+		t.Fatalf("PAT metadata validation calls = %d, want 0 for mapped account", got)
+	}
+}
+
+func assertSingleTokenHiveCanonicalRequest(t *testing.T, upstream *handoffRecorder, proxyURL, operation string) {
+	t.Helper()
+	if got := len(upstream.requests); got != 1 {
+		t.Fatalf("upstream calls = %d, want exactly one canonical TokenHive send", got)
+	}
+	req := upstream.requests[0]
+	if req == nil {
+		t.Fatal("canonical TokenHive request is nil")
+	}
+	if got := req.URL.String(); got != proxyURL {
+		t.Fatalf("transport target = %q, want %q", got, proxyURL)
+	}
+	if got := req.Header.Values(TokenHiveHeaderSourceOperation); len(got) != 1 || got[0] != operation {
+		t.Fatalf("source operation values = %q, want [%q]", got, operation)
+	}
+	if upstream.lastProxyURL != "" {
+		t.Fatalf("account proxy = %q, want direct TokenHive transport", upstream.lastProxyURL)
 	}
 }
