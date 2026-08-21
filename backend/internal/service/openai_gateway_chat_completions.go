@@ -264,10 +264,17 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		apiKeyID := getAPIKeyIDFromContext(c)
 		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
+		return nil, fmt.Errorf("build tokenhive chat completions handoff: %w", err)
+	}
 
 	// 7. Send request
 	proxyURL := ""
-	if account.Proxy != nil {
+	if tokenHiveAccount == nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)

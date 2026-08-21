@@ -330,10 +330,17 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
+		return nil, fmt.Errorf("build tokenhive messages compatibility handoff: %w", err)
+	}
 
 	// 7. Send request
 	proxyURL := ""
-	if account.Proxy != nil {
+	if tokenHiveAccount == nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 	// Grok may reject encrypted reasoning replayed under a different OAuth

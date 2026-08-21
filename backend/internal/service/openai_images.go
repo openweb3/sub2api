@@ -616,7 +616,11 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if err != nil {
 		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, upstreamReq); err != nil {
+	sourceOperation := SourceOperationOpenAIImagesGenerations
+	if parsed.IsEdits() {
+		sourceOperation = SourceOperationOpenAIImagesEdits
+	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, sourceOperation, upstreamReq); err != nil {
 		return nil, fmt.Errorf("build tokenhive images handoff: %w", err)
 	}
 	policy := s.ResolveTokenHiveResponsePolicy(account)

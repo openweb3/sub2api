@@ -13,7 +13,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/gjson"
 )
 
 func tokenHiveConfigForTest(accountID int64) config.TokenHiveConfig {
@@ -42,13 +41,113 @@ func TestTokenHiveHandoffCarriesLogicalMethodAndForcesLoopbackPOST(t *testing.T)
 			}
 			req := httptest.NewRequest(method, "https://api.openai.com/v1/fixture", bytes.NewReader(body))
 			req.Header.Add("X-TokenHive-Method", "FORGED")
-			if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "fixture-model", req); err != nil {
+			if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "fixture-model", SourceOperationOpenAIResponsesHTTP, req); err != nil {
 				t.Fatal(err)
 			}
 			if req.Method != http.MethodPost || req.Header.Get("X-TokenHive-Method") != method || len(req.Header.Values("X-TokenHive-Method")) != 1 {
 				t.Fatalf("transport_method=%q logical_method=%q method_values=%d", req.Method, req.Header.Get("X-TokenHive-Method"), len(req.Header.Values("X-TokenHive-Method")))
 			}
 		})
+	}
+}
+
+func TestTokenHiveMetadataSourceOperationExactSet(t *testing.T) {
+	want := map[string]struct{}{
+		"anthropic.messages.create":       {},
+		"anthropic.messages.stream":       {},
+		"anthropic.messages.count_tokens": {},
+		"openai.responses.http":           {},
+		"openai.responses.compact":        {},
+		"openai.responses.input_tokens":   {},
+		"openai.images.generations":       {},
+		"openai.images.edits":             {},
+		"openai.alpha_search":             {},
+		"openai.codex.models.manifest":    {},
+	}
+	if len(tokenHiveSourceOperations) != len(want) {
+		t.Fatalf("source operation count = %d, want %d", len(tokenHiveSourceOperations), len(want))
+	}
+	for operation := range want {
+		if _, ok := tokenHiveSourceOperations[operation]; !ok {
+			t.Errorf("missing source operation %q", operation)
+		}
+	}
+	for operation := range tokenHiveSourceOperations {
+		if _, ok := want[operation]; !ok {
+			t.Errorf("unexpected source operation %q", operation)
+		}
+	}
+
+	account := TokenHiveAccount{AccountID: 42, UpstreamType: UpstreamTypeOpenAICodexOAuth}
+	key := []byte("slice-1-test-tenant-hmac-key-32bytes")
+	for operation := range want {
+		t.Run(operation, func(t *testing.T) {
+			headers, err := BuildTokenHiveMetadata(context.Background(), 7, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", operation, account, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := headers.Values(TokenHiveHeaderSourceOperation); len(got) != 1 || got[0] != operation {
+				t.Fatalf("source operation values = %q, want [%q]", got, operation)
+			}
+		})
+	}
+
+	for _, operation := range []string{"", " openai.responses.http", "openai.responses.http ", "OPENAI.RESPONSES.HTTP", "openai.responses"} {
+		t.Run("reject_"+operation, func(t *testing.T) {
+			if _, err := BuildTokenHiveMetadata(context.Background(), 7, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", operation, account, key); err == nil {
+				t.Fatalf("BuildTokenHiveMetadata accepted invalid source operation %q", operation)
+			}
+		})
+	}
+}
+
+func TestApplyTokenHiveHandoffStripsForgedHeaders(t *testing.T) {
+	cfg := &config.Config{TokenHive: tokenHiveConfigForTest(42)}
+	mapped := &TokenHiveAccount{AccountID: 42, UpstreamType: UpstreamTypeOpenAICodexOAuth}
+	req := httptest.NewRequest(http.MethodPost, "https://api.openai.com/v1/responses", strings.NewReader(`{"model":"gpt-5.4"}`))
+	forgedHeaders := http.Header{
+		"X-TokenHive-Request-ID":          []string{"forged-request"},
+		"x-tokenhive-raw-url":             []string{"forged-url"},
+		"X-TOKENHIVE-UPSTREAM-TYPE":       []string{"forged-type"},
+		"x-ToKeNhIvE-Upstream-Model":      []string{"forged-model"},
+		"X-TokenHive-Tenant-Key":          []string{"forged-key"},
+		"x-tokenhive-method":              []string{"DELETE"},
+		"X-TOKENHIVE-SOURCE-OPERATION":    []string{"forged-operation"},
+		"x-ToKeNhIvE-Untrusted-Extension": []string{"forged-extra"},
+	}
+	for name, values := range forgedHeaders {
+		req.Header[name] = values
+	}
+	if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "gpt-5.4", SourceOperationOpenAIResponsesHTTP, req); err != nil {
+		t.Fatal(err)
+	}
+
+	trusted := map[string]string{
+		TokenHiveHeaderRawURL:          "https://api.openai.com/v1/responses",
+		TokenHiveHeaderUpstreamType:    UpstreamTypeOpenAICodexOAuth,
+		TokenHiveHeaderUpstreamModel:   "gpt-5.4",
+		TokenHiveHeaderMethod:          http.MethodPost,
+		TokenHiveHeaderSourceOperation: SourceOperationOpenAIResponsesHTTP,
+	}
+	tokenHiveHeaders := 0
+	for name := range req.Header {
+		if strings.HasPrefix(strings.ToLower(name), tokenHiveHeaderPrefix) {
+			tokenHiveHeaders++
+		}
+		if strings.EqualFold(name, "x-tokenhive-untrusted-extension") {
+			t.Fatalf("forged TokenHive header survived: %s", name)
+		}
+	}
+	if tokenHiveHeaders != 7 {
+		t.Fatalf("TokenHive header count = %d, want 7", tokenHiveHeaders)
+	}
+	for name, wantValue := range trusted {
+		if got := req.Header.Values(name); len(got) != 1 || got[0] != wantValue {
+			t.Errorf("%s values = %q, want [%q]", name, got, wantValue)
+		}
+	}
+	if len(req.Header.Values(TokenHiveHeaderRequestID)) != 1 || len(req.Header.Values(TokenHiveHeaderTenantKey)) != 1 {
+		t.Fatal("server-generated request ID and tenant key must each have exactly one value")
 	}
 }
 
@@ -125,7 +224,7 @@ func TestTokenHiveMetadataUsesUsageBillingRequestID(t *testing.T) {
 		t.Fatal("registry did not match dedicated account")
 	}
 	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-client-stable-123")
-	headers, err := BuildTokenHiveMetadata(ctx, 99, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
+	headers, err := BuildTokenHiveMetadata(ctx, 99, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", SourceOperationOpenAIResponsesHTTP, account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +246,7 @@ func TestTokenHiveTenantKeyVector(t *testing.T) {
 	if !ok {
 		t.Fatal("registry did not match dedicated account")
 	}
-	headers, err := BuildTokenHiveMetadata(context.Background(), 42, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
+	headers, err := BuildTokenHiveMetadata(context.Background(), 42, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", SourceOperationOpenAIResponsesHTTP, account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,90 +255,295 @@ func TestTokenHiveTenantKeyVector(t *testing.T) {
 	}
 }
 
-func TestTokenHiveAuxiliaryCallSitesUseCanonicalHandoff(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	account := &Account{
-		ID: 42, Name: "mapped", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
-		Credentials: map[string]any{"api_key": "mapped-fixture-key"}, Status: StatusActive, Schedulable: true,
+type handoffRecorder struct {
+	httpUpstreamRecorder
+}
+
+func (r *handoffRecorder) respond(status int, contentType, body string) {
+	r.resp = &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{contentType}},
+		Body:       io.NopCloser(strings.NewReader(body)),
 	}
-	tokenHiveCfg := tokenHiveConfigForTest(account.ID)
-	registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+}
+
+type sourceOperationCase struct {
+	name      string
+	operation string
+	rawURL    string
+	method    string
+	invoke    func(*testing.T, *handoffRecorder)
+}
+
+func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	openAIAccount := &Account{
+		ID: 42, Name: "mapped", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "mapped-fixture-key", "base_url": "https://api.openai.com"},
+		Extra:       map[string]any{"openai_responses_supported": true},
+		Status:      StatusActive, Schedulable: true,
+	}
+	tokenHiveCfg := tokenHiveConfigForTest(openAIAccount.ID)
+	registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*openAIAccount})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newService := func(responseBody string) (*OpenAIGatewayService, *httpUpstreamRecorder) {
-		upstream := &httpUpstreamRecorder{resp: &http.Response{
-			StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
-			Body: io.NopCloser(strings.NewReader(responseBody)),
-		}}
-		return &OpenAIGatewayService{cfg: &config.Config{TokenHive: tokenHiveCfg}, tokenHiveRegistry: registry, httpUpstream: upstream}, upstream
-	}
-	assertHandoff := func(t *testing.T, upstream *httpUpstreamRecorder, rawURL string) {
-		t.Helper()
-		if upstream.lastReq == nil {
-			t.Fatal("missing upstream request")
-		}
-		if got := upstream.lastReq.URL.String(); got != tokenHiveCfg.ProxyURL {
-			t.Fatalf("transport target=%q", got)
-		}
-		if got := upstream.lastReq.Header.Get(TokenHiveHeaderRawURL); got != rawURL {
-			t.Fatalf("logical target=%q", got)
-		}
-		if upstream.lastReq.Header.Get(TokenHiveHeaderMethod) != http.MethodPost || upstream.lastProxyURL != "" || len(upstream.requests) != 1 {
-			t.Fatalf("logical method=%q has_proxy=%t calls=%d", upstream.lastReq.Header.Get(TokenHiveHeaderMethod), upstream.lastProxyURL != "", len(upstream.requests))
+	newOpenAIService := func(upstream *handoffRecorder) *OpenAIGatewayService {
+		cfg := &config.Config{TokenHive: tokenHiveCfg}
+		return &OpenAIGatewayService{
+			cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream,
+			responseHeaderFilter: compileResponseHeaderFilter(cfg),
 		}
 	}
-
-	t.Run("images generation", func(t *testing.T) {
-		body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","response_format":"b64_json"}`)
+	newOpenAIContext := func(path string, body []byte) *gin.Context {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+		c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
 		c.Request.Header.Set("Content-Type", "application/json")
 		c.Set("api_key", &APIKey{ID: 707})
-		svc, upstream := newService(`{"created":1710000004,"data":[{"b64_json":"aGVsbG8="}]}`)
-		parsed, err := svc.ParseOpenAIImagesRequest(c, body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := svc.ForwardImages(context.Background(), c, account, body, parsed, ""); err != nil {
-			t.Fatal(err)
-		}
-		assertHandoff(t, upstream, "https://api.openai.com/v1/images/generations")
-		if gjson.Get(recorder.Body.String(), "data.0.b64_json").String() != "aGVsbG8=" {
-			t.Fatal("sub2api image client response ownership changed")
-		}
-	})
+		return c
+	}
 
-	t.Run("alpha search", func(t *testing.T) {
-		body := []byte(`{"model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
-		recorder := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(recorder)
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search?feature=standalone", bytes.NewReader(body))
-		c.Set("api_key", &APIKey{ID: 707})
-		svc, upstream := newService(`{"output":"result"}`)
-		if _, err := svc.ForwardAlphaSearch(context.Background(), c, account, body); err != nil {
-			t.Fatal(err)
-		}
-		assertHandoff(t, upstream, "https://api.openai.com/v1/alpha/search?feature=standalone")
-		if gjson.Get(recorder.Body.String(), "output").String() != "result" {
-			t.Fatal("sub2api search client response ownership changed")
-		}
-	})
+	tests := []sourceOperationCase{
+		{
+			name: "anthropic messages create", operation: SourceOperationAnthropicMessagesCreate,
+			rawURL: claudeAPIURL, method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
+				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
+				body := []byte(`{"model":"claude-sonnet-4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`)
+				parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				_, _ = svc.Forward(context.Background(), c, account, parsed)
+			},
+		},
+		{
+			name: "anthropic messages stream", operation: SourceOperationAnthropicMessagesStream,
+			rawURL: claudeAPIURL, method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
+				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
+				body := []byte(`{"model":"claude-sonnet-4","stream":true,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`)
+				parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				_, _ = svc.Forward(context.Background(), c, account, parsed)
+			},
+		},
+		{
+			name: "anthropic messages count tokens", operation: SourceOperationAnthropicMessagesCountTokens,
+			rawURL: claudeAPICountTokensURL, method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
+				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
+				body := []byte(`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hello"}]}`)
+				parsed, parseErr := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				_ = svc.ForwardCountTokens(context.Background(), c, account, parsed)
+			},
+		},
+		{
+			name: "openai responses http", operation: SourceOperationOpenAIResponsesHTTP,
+			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-5.4","stream":false,"input":"hello"}`)
+				_, _ = newOpenAIService(upstream).Forward(context.Background(), newOpenAIContext("/v1/responses", body), openAIAccount, body)
+			},
+		},
+		{
+			name: "openai responses compact", operation: SourceOperationOpenAIResponsesCompact,
+			rawURL: "https://api.openai.com/v1/responses/compact", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`)
+				_, _ = newOpenAIService(upstream).Forward(context.Background(), newOpenAIContext("/v1/responses/compact", body), openAIAccount, body)
+			},
+		},
+		{
+			name: "openai responses input tokens", operation: SourceOperationOpenAIResponsesInputTokens,
+			rawURL: "https://api.openai.com/v1/responses/input_tokens", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}`)
+				_ = newOpenAIService(upstream).ForwardCountTokensAsAnthropic(context.Background(), newOpenAIContext("/v1/messages/count_tokens", body), openAIAccount, body, "gpt-5.4")
+			},
+		},
+		{
+			name: "openai images generations", operation: SourceOperationOpenAIImagesGenerations,
+			rawURL: "https://api.openai.com/v1/images/generations", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-image-2","prompt":"draw"}`)
+				c := newOpenAIContext("/v1/images/generations", body)
+				svc := newOpenAIService(upstream)
+				parsed, parseErr := svc.ParseOpenAIImagesRequest(c, body)
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				_, _ = svc.ForwardImages(context.Background(), c, openAIAccount, body, parsed, "")
+			},
+		},
+		{
+			name: "openai images edits", operation: SourceOperationOpenAIImagesEdits,
+			rawURL: "https://api.openai.com/v1/images/edits", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-image-2","prompt":"edit","images":[{"image_url":"https://example.com/input.png"}]}`)
+				c := newOpenAIContext("/v1/images/edits", body)
+				svc := newOpenAIService(upstream)
+				parsed, parseErr := svc.ParseOpenAIImagesRequest(c, body)
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				_, _ = svc.ForwardImages(context.Background(), c, openAIAccount, body, parsed, "")
+			},
+		},
+		{
+			name: "openai alpha search", operation: SourceOperationOpenAIAlphaSearch,
+			rawURL: "https://api.openai.com/v1/alpha/search?feature=standalone", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
+				_, _ = newOpenAIService(upstream).ForwardAlphaSearch(context.Background(), newOpenAIContext("/v1/alpha/search?feature=standalone", body), openAIAccount, body)
+			},
+		},
+		{
+			name: "openai codex models manifest", operation: SourceOperationOpenAICodexModelsManifest,
+			rawURL: "https://api.openai.com/v1/models?client_version=0.145.0", method: http.MethodGet,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				_, _ = newOpenAIService(upstream).FetchCodexModelsManifestForClient(context.Background(), openAIAccount, "0.145.0", "", 707)
+			},
+		},
+	}
 
-	t.Run("count input tokens", func(t *testing.T) {
-		body := []byte(`{"model":"claude-sonnet-4-5","messages":[{"role":"user","content":"hello"}]}`)
-		recorder := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(recorder)
-		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewReader(body))
+	if len(tests) != len(tokenHiveSourceOperations) {
+		t.Fatalf("matrix rows = %d, source operations = %d", len(tests), len(tokenHiveSourceOperations))
+	}
+	seen := make(map[string]struct{}, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &handoffRecorder{}
+			tt.invoke(t, upstream)
+			if upstream.lastReq == nil {
+				t.Fatal("missing upstream request")
+			}
+			if got := upstream.lastReq.URL.String(); got != tokenHiveCfg.ProxyURL {
+				t.Fatalf("transport target = %q, want %q", got, tokenHiveCfg.ProxyURL)
+			}
+			if got := upstream.lastReq.Header.Get(TokenHiveHeaderSourceOperation); got != tt.operation || len(upstream.lastReq.Header.Values(TokenHiveHeaderSourceOperation)) != 1 {
+				t.Fatalf("source operation values = %q, want [%q]", upstream.lastReq.Header.Values(TokenHiveHeaderSourceOperation), tt.operation)
+			}
+			if got := upstream.lastReq.Header.Get(TokenHiveHeaderRawURL); got != tt.rawURL {
+				t.Fatalf("logical URL = %q, want %q", got, tt.rawURL)
+			}
+			if got := upstream.lastReq.Header.Get(TokenHiveHeaderMethod); got != tt.method {
+				t.Fatalf("logical method = %q, want %q", got, tt.method)
+			}
+			if upstream.lastProxyURL != "" || len(upstream.requests) != 1 {
+				t.Fatalf("proxy URL = %q, upstream calls = %d, want direct and one", upstream.lastProxyURL, len(upstream.requests))
+			}
+			seen[tt.operation] = struct{}{}
+		})
+	}
+	if len(seen) != len(tokenHiveSourceOperations) {
+		t.Fatalf("matrix covered %d unique source operations, want %d", len(seen), len(tokenHiveSourceOperations))
+	}
+}
+
+func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	openAIAccount := &Account{
+		ID: 42, Name: "mapped-openai", Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Concurrency: 1,
+		Credentials: map[string]any{"api_key": "mapped-fixture-key", "base_url": "https://api.openai.com"},
+		Extra:       map[string]any{"openai_responses_supported": true}, Status: StatusActive, Schedulable: true,
+	}
+	openAICfg := tokenHiveConfigForTest(openAIAccount.ID)
+	openAIRegistry, err := NewTokenHiveRegistry(openAICfg, []Account{*openAIAccount})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newOpenAIService := func(upstream *handoffRecorder) *OpenAIGatewayService {
+		cfg := &config.Config{TokenHive: openAICfg}
+		return &OpenAIGatewayService{cfg: cfg, tokenHiveRegistry: openAIRegistry, httpUpstream: upstream, responseHeaderFilter: compileResponseHeaderFilter(cfg)}
+	}
+	newContext := func(path string, body []byte) *gin.Context {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
 		c.Set("api_key", &APIKey{ID: 707})
-		svc, upstream := newService(`{"object":"response.input_tokens","input_tokens":42}`)
-		if err := svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, body, "gpt-5.4"); err != nil {
-			t.Fatal(err)
-		}
-		assertHandoff(t, upstream, "https://api.openai.com/v1/responses/input_tokens")
-		if gjson.Get(recorder.Body.String(), "input_tokens").Int() != 42 || gjson.GetBytes(upstream.lastBody, "input").Raw == "" {
-			t.Fatal("sub2api count conversion or projection ownership changed")
-		}
-	})
+		return c
+	}
+
+	tests := []sourceOperationCase{
+		{
+			name: "chat completions converts to OpenAI Responses", operation: SourceOperationOpenAIResponsesHTTP,
+			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}]}`)
+				_, _ = newOpenAIService(upstream).ForwardAsChatCompletions(context.Background(), newContext("/v1/chat/completions", body), openAIAccount, body, "", "")
+			},
+		},
+		{
+			name: "OpenAI compatible Messages converts to Responses", operation: SourceOperationOpenAIResponsesHTTP,
+			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-5.4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`)
+				_, _ = newOpenAIService(upstream).ForwardAsAnthropic(context.Background(), newContext("/v1/messages", body), openAIAccount, body, "", "")
+			},
+		},
+		{
+			name: "Anthropic compatible Chat Completions forces Messages stream", operation: SourceOperationAnthropicMessagesStream,
+			rawURL: claudeAPIURL, method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
+				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
+				body := []byte(`{"model":"claude-sonnet-4","stream":false,"messages":[{"role":"user","content":"hello"}]}`)
+				_, _ = svc.ForwardAsChatCompletions(context.Background(), c, account, body, nil)
+			},
+		},
+		{
+			name: "Anthropic compatible Responses forces Messages stream", operation: SourceOperationAnthropicMessagesStream,
+			rawURL: claudeAPIURL, method: http.MethodPost,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
+				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
+				body := []byte(`{"model":"claude-sonnet-4","stream":false,"input":"hello"}`)
+				_, _ = svc.ForwardAsResponses(context.Background(), c, account, body, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &handoffRecorder{}
+			tt.invoke(t, upstream)
+			if upstream.lastReq == nil {
+				t.Fatal("missing compatibility upstream request")
+			}
+			if got := upstream.lastReq.URL.String(); got != openAICfg.ProxyURL {
+				t.Fatalf("transport target = %q, want %q", got, openAICfg.ProxyURL)
+			}
+			if got := upstream.lastReq.Header.Values(TokenHiveHeaderSourceOperation); len(got) != 1 || got[0] != tt.operation {
+				t.Fatalf("source operation values = %q, want [%q]", got, tt.operation)
+			}
+			if got := upstream.lastReq.Header.Get(TokenHiveHeaderRawURL); got != tt.rawURL {
+				t.Fatalf("logical URL = %q, want %q", got, tt.rawURL)
+			}
+			if got := upstream.lastReq.Header.Get(TokenHiveHeaderMethod); got != tt.method {
+				t.Fatalf("logical method = %q, want %q", got, tt.method)
+			}
+			if upstream.lastProxyURL != "" || len(upstream.requests) != 1 {
+				t.Fatalf("proxy URL = %q, upstream calls = %d, want direct and one", upstream.lastProxyURL, len(upstream.requests))
+			}
+		})
+	}
 }

@@ -89,7 +89,7 @@ func (u *httpUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, acc
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
-func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) {
+func TestTokenHiveResponsesHTTPSourceOperationOverwritesForgedMetadataAndPreservesBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	originalBody := []byte(`{"model":"gpt-5.4","stream":false,"instructions":"keep <>& bytes","input":"hello"}`)
@@ -104,6 +104,7 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 		TokenHiveHeaderUpstreamModel,
 		TokenHiveHeaderTenantKey,
 		TokenHiveHeaderMethod,
+		TokenHiveHeaderSourceOperation,
 		"x-tokenhive-forged-extra",
 	} {
 		c.Request.Header[name] = []string{"forged"}
@@ -128,12 +129,13 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 			"base_url":                "https://api.openai.com",
 			"header_override_enabled": true,
 			"header_overrides": map[string]any{
-				"x-tokenhive-request-id":     "forged-override",
-				"X-TOKENHIVE-RAW-URL":        "forged-override",
-				"X-TokenHive-Upstream-Type":  CapabilityOpenAICodexResponsesHTTP,
-				"x-tokenhive-upstream-model": "forged-override",
-				"X-TokenHive-Tenant-Key":     "forged-override",
-				"x-ToKeNhIvE-forged-extra":   "forged-override",
+				"x-tokenhive-request-id":       "forged-override",
+				"X-TOKENHIVE-RAW-URL":          "forged-override",
+				"X-TokenHive-Upstream-Type":    CapabilityOpenAICodexResponsesHTTP,
+				"x-tokenhive-upstream-model":   "forged-override",
+				"X-TokenHive-Tenant-Key":       "forged-override",
+				"X-TOKENHIVE-SOURCE-OPERATION": "forged-override",
+				"x-ToKeNhIvE-forged-extra":     "forged-override",
 			},
 		},
 		ProxyID: &proxyID,
@@ -161,6 +163,7 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 	require.Equal(t, "gpt-5.4", upstream.lastReq.Header.Get(TokenHiveHeaderUpstreamModel))
 	require.Len(t, upstream.lastReq.Header.Values(TokenHiveHeaderTenantKey), 1)
 	require.Equal(t, http.MethodPost, upstream.lastReq.Header.Get(TokenHiveHeaderMethod))
+	require.Equal(t, SourceOperationOpenAIResponsesHTTP, upstream.lastReq.Header.Get(TokenHiveHeaderSourceOperation))
 	tokenHiveHeaderCount := 0
 	for name := range upstream.lastReq.Header {
 		if strings.HasPrefix(strings.ToLower(name), tokenHiveHeaderPrefix) {
@@ -170,7 +173,7 @@ func TestTokenHiveForwardOverwritesForgedMetadataAndPreservesBody(t *testing.T) 
 			t.Fatalf("forged TokenHive header survived: %s", name)
 		}
 	}
-	require.Equal(t, 6, tokenHiveHeaderCount)
+	require.Equal(t, 7, tokenHiveHeaderCount)
 }
 
 func TestOrdinaryAccountForwardIsUnchanged(t *testing.T) {

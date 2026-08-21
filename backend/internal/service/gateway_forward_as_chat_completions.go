@@ -111,18 +111,23 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
-	// 9. Get proxy URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
-
 	// 10. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	upstreamReq, _, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
+	}
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), mappedModel, SourceOperationAnthropicMessagesStream, upstreamReq); err != nil {
+		return nil, fmt.Errorf("build tokenhive chat compatibility handoff: %w", err)
+	}
+	proxyURL := ""
+	if tokenHiveAccount == nil && account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
 	}
 
 	// 11. Send request
