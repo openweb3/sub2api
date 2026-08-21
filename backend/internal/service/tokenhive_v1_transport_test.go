@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -198,22 +199,61 @@ func TestTokenHiveMappedLiveRejectsBeforeHTTPOrWSDial(t *testing.T) {
 }
 
 func TestTokenHiveOrdinaryLiveKeepsExistingUpstreamResult(t *testing.T) {
-	account := tokenHiveLiveTestAccount()
-	mappedAccount := *account
-	mappedAccount.ID++
+	account := &Account{
+		ID:          9503,
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeOAuth,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"access_token":       "ordinary-live-oauth-token",
+			"chatgpt_account_id": "acct-ordinary-live",
+		},
+	}
+	mappedAccount := *tokenHiveLiveTestAccount()
 	cfg := &config.Config{TokenHive: tokenHiveConfigForTest(mappedAccount.ID)}
-	httpUpstream := &liveHTTPUpstreamStub{}
+	httpUpstream := &tokenHiveLiveHTTPRecorder{}
+	wsDialer := &openAIWSCaptureDialer{conn: &openAIWSCaptureConn{}}
 	service := &OpenAIGatewayService{
-		cfg:               cfg,
-		tokenHiveRegistry: tokenHiveTransportTestRegistry(t, cfg.TokenHive, *account, mappedAccount),
-		httpUpstream:      httpUpstream,
+		cfg:                       cfg,
+		tokenHiveRegistry:         tokenHiveTransportTestRegistry(t, cfg.TokenHive, *account, mappedAccount),
+		httpUpstream:              httpUpstream,
+		openaiWSPassthroughDialer: wsDialer,
 	}
 
 	created, err := service.createUpstreamLiveCall(context.Background(), account, tokenHiveLiveTestRequest(), "test-attestation")
 
+	require.True(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityLive))
 	require.NoError(t, err)
 	require.Equal(t, "call_test", created.CallID)
-	require.NotNil(t, httpUpstream.request)
+	require.Equal(t, 1, httpUpstream.calls)
+	require.Equal(t, 0, wsDialer.DialCount())
+	require.Equal(t, "Bearer ordinary-live-oauth-token", httpUpstream.request.Header.Get("Authorization"))
+	require.Equal(t, "acct-ordinary-live", httpUpstream.request.Header.Get("Chatgpt-Account-Id"))
+}
+
+type tokenHiveLiveHTTPRecorder struct {
+	liveHTTPUpstreamStub
+	calls int
+}
+
+func (r *tokenHiveLiveHTTPRecorder) Do(
+	request *http.Request,
+	proxyURL string,
+	accountID int64,
+	accountConcurrency int,
+) (*http.Response, error) {
+	r.calls++
+	return r.liveHTTPUpstreamStub.Do(request, proxyURL, accountID, accountConcurrency)
+}
+
+func (r *tokenHiveLiveHTTPRecorder) DoWithTLS(
+	request *http.Request,
+	proxyURL string,
+	accountID int64,
+	accountConcurrency int,
+	_ *tlsfingerprint.Profile,
+) (*http.Response, error) {
+	return r.Do(request, proxyURL, accountID, accountConcurrency)
 }
 
 func tokenHiveLiveTestAccount() *Account {
