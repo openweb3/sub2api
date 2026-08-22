@@ -60,6 +60,21 @@ func (r *tokenHiveHandlerAccountRepo) ListSchedulableUngroupedByPlatform(context
 	return r.listAccounts(), nil
 }
 
+func (r *tokenHiveHandlerAccountRepo) ListSchedulableByGroupIDAndPlatforms(_ context.Context, _ int64, platforms []string) ([]service.Account, error) {
+	allowed := make(map[string]struct{}, len(platforms))
+	for _, platform := range platforms {
+		allowed[platform] = struct{}{}
+	}
+	accounts := r.listAccounts()
+	filtered := make([]service.Account, 0, len(accounts))
+	for _, account := range accounts {
+		if _, ok := allowed[account.Platform]; ok {
+			filtered = append(filtered, account)
+		}
+	}
+	return filtered, nil
+}
+
 func (r *tokenHiveHandlerAccountRepo) GetByID(_ context.Context, id int64) (*service.Account, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -113,6 +128,15 @@ func (u *tokenHiveHandlerUpstream) Do(_ *http.Request, _ string, accountID int64
 	u.account = append(u.account, accountID)
 	u.mu.Unlock()
 	switch u.mode {
+	case "anthropic_count_tokens_success":
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(`{"input_tokens":17}`))}, nil
+	case "openai_input_tokens_success":
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(`{"input_tokens":23}`))}, nil
+	case "codex_manifest_success":
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(bytes.NewBufferString(`{"models":[{"slug":"gpt-5.6-sol"}]}`))}, nil
 	case "images_empty":
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
 			Body: io.NopCloser(bytes.NewBufferString(`{"created":1710000021,"data":[]}`))}, nil
@@ -457,6 +481,117 @@ func runTokenHiveExecutionErrorRequest(t *testing.T, h *OpenAIGatewayHandler, en
 		h.AlphaSearch(c)
 	}
 	return rec
+}
+
+func newTokenHiveAnthropicCountTokensUsageHandler(t *testing.T) (*GatewayHandler, *tokenHiveHandlerBillingSpies) {
+	t.Helper()
+	account := service.Account{
+		ID: 42, Name: "anthropic-count-tokens", Platform: service.PlatformAnthropic, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Schedulable: true, GroupIDs: []int64{91}, Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":       "virtual-account-key",
+			"model_mapping": map[string]any{"claude-sonnet-4": "claude-sonnet-4-20250514"},
+		},
+	}
+	cfg := &config.Config{RunMode: config.RunModeStandard}
+	cfg.TokenHive = config.TokenHiveConfig{
+		Enabled:       true,
+		ProxyURL:      "http://127.0.0.1:18081/internal/v1/proxy",
+		TenantHMACKey: base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0x42}, 32)),
+		Accounts:      map[int64]string{account.ID: service.UpstreamTypeAnthropicOAuth},
+	}
+	spies := &tokenHiveHandlerBillingSpies{
+		usage:        &tokenHiveHandlerUsageLogRepo{},
+		user:         &tokenHiveHandlerUserRepo{},
+		subscription: &tokenHiveHandlerSubscriptionRepo{},
+		upstream:     &tokenHiveHandlerUpstream{mode: "anthropic_count_tokens_success"},
+	}
+	billingCache := service.NewBillingCacheService(nil, spies.user, spies.subscription, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCache.Stop)
+	gateway := service.NewGatewayService(
+		&tokenHiveHandlerAccountRepo{accounts: []service.Account{account}}, nil,
+		spies.usage, nil, spies.user, spies.subscription, nil, nil, cfg,
+		nil, nil, service.NewBillingService(cfg, nil), nil, billingCache, nil,
+		spies.upstream, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+	)
+	h := NewGatewayHandler(
+		gateway, nil, nil, nil, nil, service.NewConcurrencyService(nil), billingCache,
+		nil, nil, nil, nil, nil, nil, cfg, nil,
+	)
+	return h, spies
+}
+
+func runTokenHiveAnthropicCountTokensUsageRequest(t *testing.T, h *GatewayHandler) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupID := int64(91)
+	group := &service.Group{ID: groupID, Platform: service.PlatformAnthropic, Status: service.StatusActive, Hydrated: true}
+	user := &service.User{ID: 12, Balance: 100}
+	apiKey := &service.APIKey{ID: 11, UserID: user.ID, GroupID: &groupID, Group: group, User: user, Status: service.StatusActive}
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewBufferString(
+		`{"model":"claude-sonnet-4","messages":[{"role":"user","content":"hello"}]}`,
+	))
+	req = req.WithContext(context.WithValue(req.Context(), ctxkey.Group, group))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+	h.CountTokens(c)
+	return recorder
+}
+
+func runTokenHiveCodexModelsUsageRequest(t *testing.T, h *OpenAIGatewayHandler) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupID := int64(91)
+	group := &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, Hydrated: true}
+	user := &service.User{ID: 12, Balance: 100}
+	apiKey := &service.APIKey{ID: 11, UserID: user.ID, GroupID: &groupID, Group: group, User: user, Status: service.StatusActive}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/models?client_version=0.145.0", nil)
+	c.Set(string(middleware2.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: user.ID})
+	h.CodexModels(c)
+	return recorder
+}
+
+func TestTokenHiveAnthropicCountTokensDoesNotRecordUsage(t *testing.T) {
+	h, spies := newTokenHiveAnthropicCountTokensUsageHandler(t)
+	recorder := runTokenHiveAnthropicCountTokensUsageRequest(t, h)
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.JSONEq(t, `{"input_tokens":17}`, recorder.Body.String())
+	require.Equal(t, 1, spies.upstream.callCount())
+	require.Zero(t, spies.usage.calls)
+	require.Zero(t, spies.user.deductCalls)
+	require.Zero(t, spies.subscription.incrementCalls)
+}
+
+func TestTokenHiveResponsesInputTokensDoesNotRecordUsage(t *testing.T) {
+	h, spies := newTokenHiveUsagePolicyHandler(t, true, false, "openai_input_tokens_success")
+	recorder := runTokenHiveExecutionErrorRequest(t, h, "/v1/messages/count_tokens")
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.JSONEq(t, `{"input_tokens":23}`, recorder.Body.String())
+	require.Equal(t, 1, spies.upstream.callCount())
+	require.Zero(t, spies.usage.calls)
+	require.Zero(t, spies.user.deductCalls)
+	require.Zero(t, spies.subscription.incrementCalls)
+}
+
+func TestTokenHiveCodexModelsManifestDoesNotRecordUsage(t *testing.T) {
+	h, spies := newTokenHiveUsagePolicyHandler(t, true, false, "codex_manifest_success")
+	recorder := runTokenHiveCodexModelsUsageRequest(t, h)
+
+	require.Equal(t, http.StatusOK, recorder.Code, "body=%s", recorder.Body.String())
+	require.JSONEq(t, `{"models":[{"slug":"gpt-5.6-sol"}]}`, recorder.Body.String())
+	require.Equal(t, 1, spies.upstream.callCount())
+	require.Zero(t, spies.usage.calls)
+	require.Zero(t, spies.user.deductCalls)
+	require.Zero(t, spies.subscription.incrementCalls)
 }
 
 func TestTokenHiveResponsePolicyPreventsSameAccountRetryAndFailover(t *testing.T) {
