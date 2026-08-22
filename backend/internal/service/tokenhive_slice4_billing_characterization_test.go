@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,14 +16,14 @@ const (
 	tokenHiveSlice4FormulaVersion = "sub2api@bb7c9722b9ddefde52138aaa52c93034e1bb32b3"
 	tokenHiveSlice4FormulaCommit  = "bb7c9722b9ddefde52138aaa52c93034e1bb32b3"
 	tokenHiveSlice4HandoffCommit  = "a8b6b53eac2159b3c16402ae3dc69c9ccea884a9"
-	tokenHiveSlice4UsageCostScale = int32(10) // usage_logs cost columns are DECIMAL(20,10).
 )
 
 type billingGolden struct {
-	Name           string                            `json:"name"`
-	FormulaVersion string                            `json:"formula_version"`
-	Components     []tokenHiveSlice4BillingComponent `json:"components"`
-	Total          string                            `json:"total"`
+	Name                  string                            `json:"name"`
+	FormulaVersion        string                            `json:"formula_version"`
+	Components            []tokenHiveSlice4BillingComponent `json:"components"`
+	Total                 string                            `json:"total"`
+	RuntimeCanonicalTotal string                            `json:"runtime_canonical_total"`
 }
 
 type tokenHiveSlice4BillingGoldenCase struct {
@@ -32,11 +33,12 @@ type tokenHiveSlice4BillingGoldenCase struct {
 }
 
 type tokenHiveSlice4SourceFact struct {
-	Scope      string `json:"scope"`
-	Commit     string `json:"commit"`
-	File       string `json:"file"`
-	Symbol     string `json:"symbol"`
-	SourceTest string `json:"source_test"`
+	Scope        string `json:"scope"`
+	Commit       string `json:"commit"`
+	File         string `json:"file"`
+	Symbol       string `json:"symbol"`
+	SourceTest   string `json:"source_test,omitempty"`
+	EvidenceNote string `json:"evidence_note,omitempty"`
 }
 
 type tokenHiveSlice4BillingComponent struct {
@@ -69,6 +71,10 @@ func tokenHiveSlice4TokenFormulaSource(sourceTest string) tokenHiveSlice4SourceF
 }
 
 func tokenHiveSlice4GoldenCase(name string, source []tokenHiveSlice4SourceFact, inputs any, total string, components ...tokenHiveSlice4ComponentInput) tokenHiveSlice4BillingGoldenCase {
+	return tokenHiveSlice4GoldenCaseWithRuntimeTotal(name, source, inputs, total, total, components...)
+}
+
+func tokenHiveSlice4GoldenCaseWithRuntimeTotal(name string, source []tokenHiveSlice4SourceFact, inputs any, total, runtimeCanonicalTotal string, components ...tokenHiveSlice4ComponentInput) tokenHiveSlice4BillingGoldenCase {
 	goldenComponents := make([]tokenHiveSlice4BillingComponent, 0, len(components))
 	for _, component := range components {
 		goldenComponents = append(goldenComponents, tokenHiveSlice4BillingComponent{
@@ -79,7 +85,7 @@ func tokenHiveSlice4GoldenCase(name string, source []tokenHiveSlice4SourceFact, 
 	return tokenHiveSlice4BillingGoldenCase{
 		billingGolden: billingGolden{
 			Name: name, FormulaVersion: tokenHiveSlice4FormulaVersion,
-			Components: goldenComponents, Total: total,
+			Components: goldenComponents, Total: total, RuntimeCanonicalTotal: runtimeCanonicalTotal,
 		},
 		SourceFacts: source, ResolverInputs: inputs,
 	}
@@ -107,13 +113,14 @@ func tokenHiveSlice4RuntimePricePointer(t *testing.T, sourceDecimal string) *flo
 	return &value
 }
 
-// CostBreakdown exposes binary floats. Quantize that source-boundary value to the
-// usage_logs DECIMAL(20,10) storage expression, then compare exact decimals.
-func tokenHiveSlice4RequireRuntimeAmount(t *testing.T, expected string, runtimeAmount float64) {
+// CostBreakdown exposes binary floats. At this source boundary, use Go's shortest
+// non-exponent decimal representation and parse it back through decimal. This does
+// not simulate or claim any database storage quantization.
+func tokenHiveSlice4RequireRuntimeAmount(t *testing.T, expectedCanonical string, runtimeAmount float64) {
 	t.Helper()
-	want := tokenHiveSlice4DecimalFromString(t, expected)
-	got := decimal.NewFromFloat(runtimeAmount).Round(tokenHiveSlice4UsageCostScale)
-	require.True(t, want.Equal(got), "runtime amount: got %s want %s", got.String(), want.String())
+	runtimeString := strconv.FormatFloat(runtimeAmount, 'f', -1, 64)
+	got := tokenHiveSlice4DecimalFromString(t, runtimeString).String()
+	require.Equal(t, expectedCanonical, got, "runtime canonical amount")
 }
 
 func tokenHiveSlice4Int(value int) *int { return &value }
@@ -181,7 +188,14 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 		tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/model_pricing_resolver.go", "ModelPricingResolver.GetIntervalPricing", "TestGetIntervalPricing_MatchesInterval"),
 		tokenHiveSlice4Source("boundary", tokenHiveSlice4FormulaCommit, "backend/internal/service/channel.go", "FindMatchingInterval", "TestGetRequestTierPriceByContext_ExactBoundary"),
 	}
-	cacheSelector := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.computeCacheCreationCost", "TestCalculateCost_SupportsCacheBreakdown")
+	standardCacheSelector := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.computeCacheCreationCost", "TestCalculateCost_WithCacheTokens")
+	breakdownCacheSelector := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.computeCacheCreationCost", "TestCalculateCost_SupportsCacheBreakdown")
+	zeroDetailFallbackSelector := tokenHiveSlice4SourceFact{
+		Scope: "selector_without_bound_source_test", Commit: tokenHiveSlice4FormulaCommit,
+		File: "backend/internal/service/billing_service.go", Symbol: "BillingService.computeCacheCreationCost",
+		EvidenceNote: "No independent source test at the bound commit; see characterization_fixture fact.",
+	}
+	zeroDetailFallbackFixture := tokenHiveSlice4Source("characterization_fixture", "aaf39ab61fec7d2810b33541300419ab5b36ad8c", "backend/internal/service/tokenhive_slice4_billing_characterization_test.go", "TestTokenHiveSlice4BillingGolden/cache_aggregate_falls_back_to_5m", "TestTokenHiveSlice4BillingGolden/cache_aggregate_falls_back_to_5m")
 	imageOutputSelector := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.computeTokenBreakdown", "TestComputeTokenBreakdown_ExplicitZeroImagePrice_NoFallback")
 
 	basePrice := map[string]any{"input_price_per_token": "0.001"}
@@ -217,8 +231,8 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 
 	splitTokens := UsageTokens{CacheCreationTokens: 10, CacheCreation5mTokens: 4, CacheCreation1hTokens: 6}
 	splitCost := tokenHiveSlice4CalculateTokenCost(t, "fixture-cache", splitTokens, aggregateResolved)
-	tokenHiveSlice4RequireRuntimeAmount(t, "0.052", splitCost.TotalCost)
-	tokenHiveSlice4RequireRuntimeAmount(t, "0.052", splitCost.CacheCreationCost)
+	tokenHiveSlice4RequireRuntimeAmount(t, "0.052000000000000005", splitCost.TotalCost)
+	tokenHiveSlice4RequireRuntimeAmount(t, "0.052000000000000005", splitCost.CacheCreationCost)
 
 	explicitZeroTokens := UsageTokens{CacheCreationTokens: 10}
 	explicitZeroResolved := &ResolvedPricing{Mode: BillingModeToken, BasePricing: &ModelPricing{
@@ -245,22 +259,23 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 	tokenHiveSlice4RequireRuntimeAmount(t, "0.1", fallbackImageCost.ImageOutputCost)
 
 	baseFormula := tokenHiveSlice4TokenFormulaSource("TestCalculateCostUnified_TokenMode")
-	modelPolicy := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.applyModelSpecificPricingPolicy", "TestGPT56ExplicitZeroCacheWritePriceIsPreserved")
+	explicitZeroModelPolicy := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.applyModelSpecificPricingPolicy", "TestGPT56ExplicitZeroCacheWritePriceIsPreserved")
+	fallbackModelPolicy := tokenHiveSlice4Source("selector", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.applyModelSpecificPricingPolicy", "TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier")
 	cases := []tokenHiveSlice4BillingGoldenCase{
 		tokenHiveSlice4GoldenCase("interval_lower_bound_open", append([]tokenHiveSlice4SourceFact{baseFormula}, intervalSelector...), tokenHiveSlice4TokenResolverInputs("fixture-interval", map[string]int{"input_tokens": 100}, basePrice, intervalInputs), "0.1",
 			tokenHiveSlice4ComponentInput{"input", "base_pricing because total_context == interval.min", "100", "0.001", "0.1"}),
 		tokenHiveSlice4GoldenCase("interval_upper_bound_closed", append([]tokenHiveSlice4SourceFact{baseFormula}, intervalSelector...), tokenHiveSlice4TokenResolverInputs("fixture-interval", map[string]int{"input_tokens": 200}, basePrice, intervalInputs), "0.4",
 			tokenHiveSlice4ComponentInput{"input", "first interval because min < total_context <= max", "200", "0.002", "0.4"}),
-		tokenHiveSlice4GoldenCase("cache_aggregate_standard", []tokenHiveSlice4SourceFact{baseFormula, cacheSelector}, tokenHiveSlice4TokenResolverInputs("fixture-cache", map[string]int{"cache_creation_tokens": 10}, map[string]any{"cache_creation_price_per_token": "0.003", "supports_cache_breakdown": false}, nil), "0.03",
+		tokenHiveSlice4GoldenCase("cache_aggregate_standard", []tokenHiveSlice4SourceFact{baseFormula, standardCacheSelector}, tokenHiveSlice4TokenResolverInputs("fixture-cache", map[string]int{"cache_creation_tokens": 10}, map[string]any{"cache_creation_price_per_token": "0.003", "supports_cache_breakdown": false}, nil), "0.03",
 			tokenHiveSlice4ComponentInput{"cache_creation", "aggregate cache_creation_tokens at standard price", "10", "0.003", "0.03"}),
-		tokenHiveSlice4GoldenCase("cache_aggregate_falls_back_to_5m", []tokenHiveSlice4SourceFact{baseFormula, cacheSelector}, tokenHiveSlice4TokenResolverInputs("fixture-cache", map[string]int{"cache_creation_tokens": 10, "cache_creation_5m_tokens": 0, "cache_creation_1h_tokens": 0}, map[string]any{"supports_cache_breakdown": true, "cache_creation_5m_price": "0.004", "cache_creation_1h_price": "0.006"}, nil), "0.04",
+		tokenHiveSlice4GoldenCase("cache_aggregate_falls_back_to_5m", []tokenHiveSlice4SourceFact{baseFormula, zeroDetailFallbackSelector, zeroDetailFallbackFixture}, tokenHiveSlice4TokenResolverInputs("fixture-cache", map[string]int{"cache_creation_tokens": 10, "cache_creation_5m_tokens": 0, "cache_creation_1h_tokens": 0}, map[string]any{"supports_cache_breakdown": true, "cache_creation_5m_price": "0.004", "cache_creation_1h_price": "0.006"}, nil), "0.04",
 			tokenHiveSlice4ComponentInput{"cache_creation_5m", "aggregate tokens at 5m when both detail counters are zero", "10", "0.004", "0.04"}),
-		tokenHiveSlice4GoldenCase("cache_5m_1h_split", []tokenHiveSlice4SourceFact{baseFormula, cacheSelector}, tokenHiveSlice4TokenResolverInputs("fixture-cache", map[string]int{"cache_creation_tokens": 10, "cache_creation_5m_tokens": 4, "cache_creation_1h_tokens": 6}, map[string]any{"supports_cache_breakdown": true, "cache_creation_5m_price": "0.004", "cache_creation_1h_price": "0.006"}, nil), "0.052",
+		tokenHiveSlice4GoldenCaseWithRuntimeTotal("cache_5m_1h_split", []tokenHiveSlice4SourceFact{baseFormula, breakdownCacheSelector}, tokenHiveSlice4TokenResolverInputs("fixture-cache", map[string]int{"cache_creation_tokens": 10, "cache_creation_5m_tokens": 4, "cache_creation_1h_tokens": 6}, map[string]any{"supports_cache_breakdown": true, "cache_creation_5m_price": "0.004", "cache_creation_1h_price": "0.006"}, nil), "0.052", "0.052000000000000005",
 			tokenHiveSlice4ComponentInput{"cache_creation_5m", "cache_creation_5m_tokens", "4", "0.004", "0.016"},
 			tokenHiveSlice4ComponentInput{"cache_creation_1h", "cache_creation_1h_tokens", "6", "0.006", "0.036"}),
-		tokenHiveSlice4GoldenCase("cache_explicit_zero", []tokenHiveSlice4SourceFact{baseFormula, cacheSelector, modelPolicy}, tokenHiveSlice4TokenResolverInputs("gpt-5.6-sol", map[string]int{"cache_creation_tokens": 10}, map[string]any{"input_price_per_token": "0.008", "cache_creation_price_per_token": "0", "cache_creation_price_explicit": true}, nil), "0",
+		tokenHiveSlice4GoldenCase("cache_explicit_zero", []tokenHiveSlice4SourceFact{baseFormula, standardCacheSelector, explicitZeroModelPolicy}, tokenHiveSlice4TokenResolverInputs("gpt-5.6-sol", map[string]int{"cache_creation_tokens": 10}, map[string]any{"input_price_per_token": "0.008", "cache_creation_price_per_token": "0", "cache_creation_price_explicit": true}, nil), "0",
 			tokenHiveSlice4ComponentInput{"cache_creation", "explicit zero suppresses model fallback", "10", "0", "0"}),
-		tokenHiveSlice4GoldenCase("cache_zero_falls_back_for_gpt_5_6", []tokenHiveSlice4SourceFact{baseFormula, cacheSelector, modelPolicy}, tokenHiveSlice4TokenResolverInputs("gpt-5.6-sol", map[string]int{"cache_creation_tokens": 10}, map[string]any{"input_price_per_token": "0.008", "cache_creation_price_per_token": "0", "cache_creation_price_explicit": false}, nil), "0.1",
+		tokenHiveSlice4GoldenCase("cache_zero_falls_back_for_gpt_5_6", []tokenHiveSlice4SourceFact{baseFormula, standardCacheSelector, fallbackModelPolicy}, tokenHiveSlice4TokenResolverInputs("gpt-5.6-sol", map[string]int{"cache_creation_tokens": 10}, map[string]any{"input_price_per_token": "0.008", "cache_creation_price_per_token": "0", "cache_creation_price_explicit": false}, nil), "0.1",
 			tokenHiveSlice4ComponentInput{"cache_creation", "non-explicit zero falls back to input_price * 1.25", "10", "0.01", "0.1"}),
 		tokenHiveSlice4GoldenCase("image_output_explicit_zero", []tokenHiveSlice4SourceFact{baseFormula, imageOutputSelector}, tokenHiveSlice4TokenResolverInputs("fixture-image-token", map[string]int{"output_tokens": 5, "image_output_tokens": 5}, map[string]any{"output_price_per_token": "0.02", "image_output_price_per_token": "0", "image_output_price_explicit": true}, nil), "0",
 			tokenHiveSlice4ComponentInput{"image_output", "explicit zero image output price", "5", "0", "0"}),
@@ -284,12 +299,13 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 	}
 	billing := &BillingService{}
 	for _, imageCase := range imageCases {
-		resolution := ResolveImageBillingSize(imageCase.inputSize, nil)
+		outputSizes := []string{}
+		resolution := ResolveImageBillingSize(imageCase.inputSize, outputSizes)
 		require.Equal(t, imageCase.wantTier, resolution.BillingSize)
 		cost := billing.CalculateImageCost("fixture-image", resolution.BillingSize, 2, prices, 1)
 		tokenHiveSlice4RequireRuntimeAmount(t, imageCase.total, cost.TotalCost)
 		cases = append(cases, tokenHiveSlice4GoldenCase(imageCase.name, imageSources, map[string]any{
-			"model": "fixture-image", "input_size": imageCase.inputSize, "output_sizes": []string{},
+			"model": "fixture-image", "input_size": imageCase.inputSize, "output_sizes": outputSizes,
 			"resolution": map[string]any{
 				"billing_size": resolution.BillingSize, "input_size": resolution.InputSize,
 				"output_size": resolution.OutputSize, "source": resolution.Source, "breakdown": resolution.Breakdown,
@@ -304,8 +320,8 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 		Resolver: &ModelPricingResolver{}, Resolved: perRequestResolved,
 	})
 	require.NoError(t, err)
-	tokenHiveSlice4RequireRuntimeAmount(t, "0.21", perRequestCost.TotalCost)
-	cases = append(cases, tokenHiveSlice4GoldenCase("per_request_count", []tokenHiveSlice4SourceFact{
+	tokenHiveSlice4RequireRuntimeAmount(t, "0.21000000000000002", perRequestCost.TotalCost)
+	cases = append(cases, tokenHiveSlice4GoldenCaseWithRuntimeTotal("per_request_count", []tokenHiveSlice4SourceFact{
 		tokenHiveSlice4Source("formula", tokenHiveSlice4FormulaCommit, "backend/internal/service/billing_service.go", "BillingService.calculatePerRequestCost", "TestCalculateCostUnified_PerRequestMode"),
 	}, map[string]any{
 		"model": "fixture-request", "request_count": 3, "size_tier": "",
@@ -319,7 +335,7 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 			"default_per_request_price": "0.07", "source": "", "supports_cache_breakdown": false,
 		},
 		"rate_multiplier": "1",
-	}, "0.21",
+	}, "0.21", "0.21000000000000002",
 		tokenHiveSlice4ComponentInput{"request", "default per-request price", "3", "0.07", "0.21"}))
 
 	alphaCost := billing.CalculateWebSearchCost(1, nil, 1)
@@ -353,6 +369,7 @@ func TestTokenHiveSlice4BillingGolden(t *testing.T) {
 			}
 			total := tokenHiveSlice4DecimalFromString(t, goldenCase.Total)
 			require.True(t, componentTotal.Equal(total), "component total: got %s want %s", componentTotal.String(), total.String())
+			tokenHiveSlice4DecimalFromString(t, goldenCase.RuntimeCanonicalTotal)
 		})
 	}
 
@@ -362,4 +379,46 @@ func TestTokenHiveSlice4BillingGolden(t *testing.T) {
 		payload = append(payload, '\n')
 		require.NoError(t, os.WriteFile(output, payload, 0o644))
 	}
+}
+
+func TestTokenHiveSlice4CacheProvenanceMatchesEachBoundBranch(t *testing.T) {
+	cases := tokenHiveSlice4BillingGoldenCases(t)
+	byName := make(map[string]tokenHiveSlice4BillingGoldenCase, len(cases))
+	for _, goldenCase := range cases {
+		byName[goldenCase.Name] = goldenCase
+	}
+
+	require.Contains(t, byName["cache_aggregate_standard"].SourceFacts, tokenHiveSlice4SourceFact{
+		Scope: "selector", Commit: tokenHiveSlice4FormulaCommit,
+		File: "backend/internal/service/billing_service.go", Symbol: "BillingService.computeCacheCreationCost",
+		SourceTest: "TestCalculateCost_WithCacheTokens",
+	})
+	require.Contains(t, byName["cache_5m_1h_split"].SourceFacts, tokenHiveSlice4SourceFact{
+		Scope: "selector", Commit: tokenHiveSlice4FormulaCommit,
+		File: "backend/internal/service/billing_service.go", Symbol: "BillingService.computeCacheCreationCost",
+		SourceTest: "TestCalculateCost_SupportsCacheBreakdown",
+	})
+	require.Contains(t, byName["cache_explicit_zero"].SourceFacts, tokenHiveSlice4SourceFact{
+		Scope: "selector", Commit: tokenHiveSlice4FormulaCommit,
+		File: "backend/internal/service/billing_service.go", Symbol: "BillingService.applyModelSpecificPricingPolicy",
+		SourceTest: "TestGPT56ExplicitZeroCacheWritePriceIsPreserved",
+	})
+	require.Contains(t, byName["cache_zero_falls_back_for_gpt_5_6"].SourceFacts, tokenHiveSlice4SourceFact{
+		Scope: "selector", Commit: tokenHiveSlice4FormulaCommit,
+		File: "backend/internal/service/billing_service.go", Symbol: "BillingService.applyModelSpecificPricingPolicy",
+		SourceTest: "TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier",
+	})
+
+	fallbackFacts := byName["cache_aggregate_falls_back_to_5m"].SourceFacts
+	require.Contains(t, fallbackFacts, tokenHiveSlice4SourceFact{
+		Scope: "selector_without_bound_source_test", Commit: tokenHiveSlice4FormulaCommit,
+		File: "backend/internal/service/billing_service.go", Symbol: "BillingService.computeCacheCreationCost",
+		EvidenceNote: "No independent source test at the bound commit; see characterization_fixture fact.",
+	})
+	require.Contains(t, fallbackFacts, tokenHiveSlice4SourceFact{
+		Scope: "characterization_fixture", Commit: "aaf39ab61fec7d2810b33541300419ab5b36ad8c",
+		File:       "backend/internal/service/tokenhive_slice4_billing_characterization_test.go",
+		Symbol:     "TestTokenHiveSlice4BillingGolden/cache_aggregate_falls_back_to_5m",
+		SourceTest: "TestTokenHiveSlice4BillingGolden/cache_aggregate_falls_back_to_5m",
+	})
 }
