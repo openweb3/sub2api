@@ -153,6 +153,47 @@ func TestApplyTokenHiveHandoffStripsForgedHeaders(t *testing.T) {
 	}
 }
 
+func TestApplyTokenHiveHandoffStripsDuplicateAndAliasedForgedHeaders(t *testing.T) {
+	cfg := &config.Config{TokenHive: tokenHiveConfigForTest(42)}
+	mapped := &TokenHiveAccount{AccountID: 42, UpstreamType: UpstreamTypeOpenAICodexOAuth}
+	req := httptest.NewRequest(http.MethodPost, "https://api.openai.com/v1/responses", strings.NewReader(`{"model":"gpt-5.4"}`))
+	forgedValues := []string{
+		"forged-source-one", "forged-source-two", "forged-source-alias-one", "forged-source-alias-two",
+		"forged-request-one", "forged-request-two", "forged-request-alias-one", "forged-request-alias-two",
+	}
+	req.Header[TokenHiveHeaderSourceOperation] = []string{forgedValues[0], forgedValues[1]}
+	req.Header["x-ToKeNhIvE-sOuRcE-oPeRaTiOn"] = []string{forgedValues[2], forgedValues[3]}
+	req.Header[TokenHiveHeaderRequestID] = []string{forgedValues[4], forgedValues[5]}
+	req.Header["x-ToKeNhIvE-rEqUeSt-Id"] = []string{forgedValues[6], forgedValues[7]}
+
+	if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "gpt-5.4", SourceOperationOpenAIResponsesHTTP, req); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := req.Header.Values(TokenHiveHeaderSourceOperation); len(got) != 1 || got[0] != SourceOperationOpenAIResponsesHTTP {
+		t.Fatalf("source operation values = %q, want one canonical value", got)
+	}
+	if got := req.Header.Values(TokenHiveHeaderRequestID); len(got) != 1 || strings.TrimSpace(got[0]) == "" {
+		t.Fatalf("request ID values = %q, want one server value", got)
+	}
+	tokenHiveHeaders := 0
+	for name, values := range req.Header {
+		if strings.HasPrefix(strings.ToLower(name), tokenHiveHeaderPrefix) {
+			tokenHiveHeaders++
+		}
+		for _, value := range values {
+			for _, forged := range forgedValues {
+				if value == forged {
+					t.Fatalf("forged metadata survived name=%s", name)
+				}
+			}
+		}
+	}
+	if tokenHiveHeaders != 7 {
+		t.Fatalf("TokenHive header count = %d, want 7", tokenHiveHeaders)
+	}
+}
+
 func TestTokenHiveConfigRejectsInvalidRegistry(t *testing.T) {
 	cfg := tokenHiveConfigForTest(42)
 	tests := []struct {
