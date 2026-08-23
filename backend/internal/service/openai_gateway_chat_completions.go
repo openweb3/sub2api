@@ -268,7 +268,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		apiKeyID := getAPIKeyIDFromContext(c)
 		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, true, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
 		return nil, fmt.Errorf("build tokenhive chat completions handoff: %w", err)
 	}
 

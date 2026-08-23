@@ -127,7 +127,7 @@ func (s *GatewayService) ForwardAsResponses(
 	if err != nil {
 		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), mappedModel, SourceOperationAnthropicMessagesStream, upstreamReq); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), mappedModel, reqStream, SourceOperationAnthropicMessagesStream, upstreamReq); err != nil {
 		return nil, fmt.Errorf("build tokenhive responses compatibility handoff: %w", err)
 	}
 	proxyURL := ""

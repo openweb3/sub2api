@@ -78,7 +78,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, err
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, SourceOperationOpenAIAlphaSearch, req); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, false, SourceOperationOpenAIAlphaSearch, req); err != nil {
 		return nil, fmt.Errorf("build tokenhive alpha search handoff: %w", err)
 	}
 

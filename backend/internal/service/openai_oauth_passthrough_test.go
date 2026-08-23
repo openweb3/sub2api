@@ -105,6 +105,7 @@ func TestTokenHiveResponsesHTTPSourceOperationOverwritesForgedMetadataAndPreserv
 		TokenHiveHeaderTenantKey,
 		TokenHiveHeaderMethod,
 		TokenHiveHeaderSourceOperation,
+		TokenHiveHeaderStream,
 		"x-tokenhive-forged-extra",
 	} {
 		c.Request.Header[name] = []string{"forged"}
@@ -135,6 +136,7 @@ func TestTokenHiveResponsesHTTPSourceOperationOverwritesForgedMetadataAndPreserv
 				"x-tokenhive-upstream-model":   "forged-override",
 				"X-TokenHive-Tenant-Key":       "forged-override",
 				"X-TOKENHIVE-SOURCE-OPERATION": "forged-override",
+				"X-TokenHive-Stream":           "forged-override",
 				"x-ToKeNhIvE-forged-extra":     "forged-override",
 			},
 		},
@@ -164,6 +166,7 @@ func TestTokenHiveResponsesHTTPSourceOperationOverwritesForgedMetadataAndPreserv
 	require.Len(t, upstream.lastReq.Header.Values(TokenHiveHeaderTenantKey), 1)
 	require.Equal(t, http.MethodPost, upstream.lastReq.Header.Get(TokenHiveHeaderMethod))
 	require.Equal(t, SourceOperationOpenAIResponsesHTTP, upstream.lastReq.Header.Get(TokenHiveHeaderSourceOperation))
+	require.Equal(t, "false", upstream.lastReq.Header.Get(TokenHiveHeaderStream))
 	tokenHiveHeaderCount := 0
 	for name := range upstream.lastReq.Header {
 		if strings.HasPrefix(strings.ToLower(name), tokenHiveHeaderPrefix) {
@@ -173,7 +176,7 @@ func TestTokenHiveResponsesHTTPSourceOperationOverwritesForgedMetadataAndPreserv
 			t.Fatalf("forged TokenHive header survived: %s", name)
 		}
 	}
-	require.Equal(t, 7, tokenHiveHeaderCount)
+	require.Equal(t, 8, tokenHiveHeaderCount)
 }
 
 func TestOrdinaryAccountForwardIsUnchanged(t *testing.T) {

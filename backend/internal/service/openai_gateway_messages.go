@@ -334,7 +334,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, isStream, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
 		return nil, fmt.Errorf("build tokenhive messages compatibility handoff: %w", err)
 	}
 
