@@ -33,11 +33,16 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	responsePolicy := s.ResolveTokenHiveResponsePolicy(account)
 	// 入口分流：APIKey 账号 + 上游不支持 Responses API → 走 CC 直转（与
 	// ForwardAsChatCompletions 对称）。缺少此分流时，/v1/messages 入站请求
 	// 会被无条件转为 Responses 格式发往上游 /v1/responses，导致只支持
 	// /v1/chat/completions 的第三方 OpenAI 兼容上游全部 400。
-	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+	if tokenHiveAccount == nil && account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
 		return s.forwardAnthropicViaRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 
@@ -330,10 +335,13 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	if compatTurnState != "" && upstreamReq.Header.Get("x-codex-turn-state") == "" {
 		upstreamReq.Header.Set("x-codex-turn-state", compatTurnState)
 	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, isStream, SourceOperationOpenAIResponsesHTTP, upstreamReq); err != nil {
+		return nil, fmt.Errorf("build tokenhive messages compatibility handoff: %w", err)
+	}
 
 	// 7. Send request
 	proxyURL := ""
-	if account.Proxy != nil {
+	if tokenHiveAccount == nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 	// Grok may reject encrypted reasoning replayed under a different OAuth
@@ -354,7 +362,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		}
 		resp, err = s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 		if err != nil {
-			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+			return nil, s.handleOpenAIUpstreamTransportErrorWithPolicy(ctx, c, account, err, false, responsePolicy)
 		}
 		if account.Platform != PlatformGrok || attempt > 0 || resp.StatusCode != http.StatusBadRequest {
 			break
@@ -399,7 +407,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 			return s.ForwardAsAnthropic(markAgentIdentityTaskRecoveryTried(ctx), c, account, body, promptCacheKey, defaultMappedModel)
 		}
-		if previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
+		if responsePolicy.AllowSameAccountRetry && previousResponseID != "" && (isOpenAICompatPreviousResponseNotFound(resp.StatusCode, upstreamMsg, respBody) || isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody)) {
 			if isOpenAICompatPreviousResponseUnsupported(resp.StatusCode, upstreamMsg, respBody) {
 				s.disableOpenAICompatSessionContinuation(ctx, c, account, promptCacheKey)
 			} else {
@@ -425,11 +433,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				return s.ForwardAsAnthropic(markGrokEncryptedContentStripRetried(ctx), c, account, strippedBody, promptCacheKey, defaultMappedModel)
 			}
 		}
-		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
+		if handled, executionErr := handleTokenHiveExecutionErrorResponse(resp, c, account, respBody, responsePolicy, true); handled {
+			return nil, executionErr
+		}
+		if foErr := s.failoverOpenAIUpstreamHTTPErrorWithPolicy(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, responsePolicy); foErr != nil {
 			return nil, foErr
 		}
 		// Non-failover error: return Anthropic-formatted error to client
-		return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		return s.handleAnthropicErrorResponseWithPolicy(resp, c, account, responsePolicy, billingModel)
 	}
 	if account.Platform == PlatformGrok && account.Type == AccountTypeOAuth && !account.IsShadow() {
 		s.updateGrokUsageFromResponse(ctx, account, resp.Header, resp.StatusCode)
@@ -512,6 +523,16 @@ func (s *OpenAIGatewayService) handleAnthropicErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	return s.handleCompatErrorResponse(resp, c, account, writeAnthropicError, requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleAnthropicErrorResponseWithPolicy(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	policy TokenHiveResponsePolicy,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
+	return s.handleCompatErrorResponseWithPolicy(resp, c, account, writeAnthropicError, policy, requestedModel...)
 }
 
 // handleAnthropicBufferedStreamingResponse reads all Responses SSE events from

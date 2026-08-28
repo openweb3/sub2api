@@ -126,6 +126,92 @@ func TestTokenHiveResponsePolicySuppressesTransportAndUpstreamSideEffects(t *tes
 	require.Zero(t, scheduler.switches)
 }
 
+func TestTokenHiveOpenAICompatibilityPolicyControlsHTTPFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name   string
+		path   string
+		body   []byte
+		invoke func(*OpenAIGatewayService, *gin.Context, *Account, []byte) (*OpenAIForwardResult, error)
+	}{
+		{
+			name: "chat completions",
+			path: "/v1/chat/completions",
+			body: []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}]}`),
+			invoke: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+				return s.ForwardAsChatCompletions(context.Background(), c, account, body, "", "")
+			},
+		},
+		{
+			name: "messages",
+			path: "/v1/messages",
+			body: []byte(`{"model":"gpt-5.4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`),
+			invoke: func(s *OpenAIGatewayService, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+				return s.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+			},
+		},
+	}
+
+	for _, dedicated := range []bool{true, false} {
+		policyName := "ordinary"
+		if dedicated {
+			policyName = "dedicated"
+		}
+		for _, tt := range tests {
+			t.Run(policyName+"/"+tt.name, func(t *testing.T) {
+				account := &Account{
+					ID: 81, Name: policyName, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+					Status: StatusActive, Schedulable: true, Concurrency: 1,
+					Credentials: map[string]any{"api_key": "virtual-openai-key", "base_url": "https://api.openai.com"},
+					Extra:       map[string]any{"openai_responses_supported": true},
+				}
+				cfg := &config.Config{}
+				var registry *TokenHiveRegistry
+				if dedicated {
+					cfg.TokenHive = tokenHiveConfigForTest(account.ID)
+					var err error
+					registry, err = NewTokenHiveRegistry(cfg.TokenHive, []Account{*account})
+					require.NoError(t, err)
+				}
+				repo := &tokenHivePolicyAccountRepo{}
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Header:     http.Header{"Content-Type": []string{"application/json"}, "Retry-After": []string{"60"}},
+					Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"retry me"}}`)),
+				}}
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodPost, tt.path, bytes.NewReader(tt.body))
+				c.Request.Header.Set("Content-Type", "application/json")
+				c.Set("api_key", &APIKey{ID: 707})
+				rateLimits := NewRateLimitService(repo, nil, cfg, nil, nil)
+				svc := &OpenAIGatewayService{
+					cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream,
+					rateLimitService: rateLimits, accountRepo: repo,
+					responseHeaderFilter: compileResponseHeaderFilter(cfg),
+				}
+				rateLimits.SetAccountRuntimeBlocker(svc)
+
+				result, err := tt.invoke(svc, c, account, tt.body)
+
+				require.Error(t, err)
+				require.Nil(t, result)
+				var failoverErr *UpstreamFailoverError
+				require.Equal(t, !dedicated, errors.As(err, &failoverErr))
+				require.Len(t, upstream.requests, 1)
+				if dedicated {
+					require.Zero(t, repo.tempUnschedulable)
+					require.Zero(t, repo.setError)
+					require.Zero(t, repo.rateLimited)
+					require.False(t, svc.isOpenAIAccountRuntimeBlocked(account))
+				} else {
+					require.Greater(t, repo.rateLimited, 0)
+				}
+			})
+		}
+	}
+}
+
 func TestTokenHiveResponsePolicyPreservesTrustedExecutionError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

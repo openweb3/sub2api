@@ -121,7 +121,7 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	if err != nil {
 		return fmt.Errorf("resolve tokenhive account: %w", err)
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), prepared.UpstreamModel, upstreamReq); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), prepared.UpstreamModel, false, SourceOperationOpenAIResponsesInputTokens, upstreamReq); err != nil {
 		return fmt.Errorf("build tokenhive input_tokens handoff: %w", err)
 	}
 	policy := s.ResolveTokenHiveResponsePolicy(account)

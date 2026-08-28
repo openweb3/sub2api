@@ -15,27 +15,74 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 const (
-	UpstreamTypeOpenAICodexOAuth        = "openai_codex_oauth"
-	UpstreamTypeAnthropicOAuth          = "anthropic_oauth"
-	CapabilityOpenAICodexResponsesHTTP  = "openai.codex.responses.http"
-	CapabilityOpenAICodexModelsManifest = "openai.codex.models.manifest"
-	TokenHiveHeaderRequestID            = "X-TokenHive-Request-ID"
-	TokenHiveHeaderRawURL               = "X-TokenHive-Raw-URL"
-	TokenHiveHeaderUpstreamType         = "X-TokenHive-Upstream-Type"
-	TokenHiveHeaderUpstreamModel        = "X-TokenHive-Upstream-Model"
-	TokenHiveHeaderTenantKey            = "X-TokenHive-Tenant-Key"
-	TokenHiveHeaderMethod               = "X-TokenHive-Method"
-	tokenHiveHeaderPrefix               = "x-tokenhive-"
-	tokenHiveTenantKeyMessagePrefix     = "tokenhive:tenant-key:v1\x00api-key-record-id\x00"
+	UpstreamTypeOpenAICodexOAuth                = "openai_codex_oauth"
+	UpstreamTypeAnthropicOAuth                  = "anthropic_oauth"
+	CapabilityOpenAICodexResponsesHTTP          = "openai.codex.responses.http"
+	CapabilityOpenAICodexModelsManifest         = "openai.codex.models.manifest"
+	TokenHiveHeaderRequestID                    = "X-TokenHive-Request-ID"
+	TokenHiveHeaderRawURL                       = "X-TokenHive-Raw-URL"
+	TokenHiveHeaderUpstreamType                 = "X-TokenHive-Upstream-Type"
+	TokenHiveHeaderUpstreamModel                = "X-TokenHive-Upstream-Model"
+	TokenHiveHeaderTenantKey                    = "X-TokenHive-Tenant-Key"
+	TokenHiveHeaderMethod                       = "X-TokenHive-Method"
+	TokenHiveHeaderSourceOperation              = "X-TokenHive-Source-Operation"
+	TokenHiveHeaderStream                       = "X-TokenHive-Stream"
+	SourceOperationAnthropicMessagesCreate      = "anthropic.messages.create"
+	SourceOperationAnthropicMessagesStream      = "anthropic.messages.stream"
+	SourceOperationAnthropicMessagesCountTokens = "anthropic.messages.count_tokens"
+	SourceOperationOpenAIResponsesHTTP          = "openai.responses.http"
+	SourceOperationOpenAIResponsesCompact       = "openai.responses.compact"
+	SourceOperationOpenAIResponsesInputTokens   = "openai.responses.input_tokens"
+	SourceOperationOpenAIImagesGenerations      = "openai.images.generations"
+	SourceOperationOpenAIImagesEdits            = "openai.images.edits"
+	SourceOperationOpenAIAlphaSearch            = "openai.alpha_search"
+	SourceOperationOpenAICodexModelsManifest    = "openai.codex.models.manifest"
+	tokenHiveHeaderPrefix                       = "x-tokenhive-"
+	tokenHiveTenantKeyMessagePrefix             = "tokenhive:tenant-key:v1\x00api-key-record-id\x00"
 )
 
 var tokenHiveUpstreamPlatforms = map[string]string{
 	UpstreamTypeOpenAICodexOAuth: PlatformOpenAI,
 	UpstreamTypeAnthropicOAuth:   PlatformAnthropic,
+}
+
+var (
+	errInvalidSourceOperation          = errors.New("invalid tokenhive source operation")
+	errTokenHiveV1UnsupportedTransport = errors.New("tokenhive v1 unsupported transport")
+	tokenHiveSourceOperations          = map[string]struct{}{
+		SourceOperationAnthropicMessagesCreate:      {},
+		SourceOperationAnthropicMessagesStream:      {},
+		SourceOperationAnthropicMessagesCountTokens: {},
+		SourceOperationOpenAIResponsesHTTP:          {},
+		SourceOperationOpenAIResponsesCompact:       {},
+		SourceOperationOpenAIResponsesInputTokens:   {},
+		SourceOperationOpenAIImagesGenerations:      {},
+		SourceOperationOpenAIImagesEdits:            {},
+		SourceOperationOpenAIAlphaSearch:            {},
+		SourceOperationOpenAICodexModelsManifest:    {},
+	}
+)
+
+func (s *OpenAIGatewayService) rejectTokenHiveV1Transport(ctx context.Context, account *Account, transport string) error {
+	mapped, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return fmt.Errorf("resolve tokenhive account for v1 transport: %w", err)
+	}
+	if mapped == nil {
+		return nil
+	}
+	logger.FromContext(ctx).Warn(
+		"TokenHive v1 transport rejected",
+		zap.Int64("account_id", account.ID),
+		zap.String("transport", transport),
+	)
+	return fmt.Errorf("%w: TokenHive v1 does not support %s", errTokenHiveV1UnsupportedTransport, transport)
 }
 
 type TokenHiveAccount struct {
@@ -111,7 +158,14 @@ func resolveTokenHiveAccount(cfg *config.Config, registry *TokenHiveRegistry, ac
 	return &mapped, nil
 }
 
-func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method string, rawURL string, upstreamModel string, account TokenHiveAccount, key []byte) (http.Header, error) {
+func validateTokenHiveSourceOperation(value string) error {
+	if _, ok := tokenHiveSourceOperations[value]; !ok {
+		return errInvalidSourceOperation
+	}
+	return nil
+}
+
+func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method string, rawURL string, upstreamModel string, stream bool, sourceOperation string, account TokenHiveAccount, key []byte) (http.Header, error) {
 	if apiKeyRecordID <= 0 {
 		return nil, fmt.Errorf("tokenhive API key record ID must be positive")
 	}
@@ -123,6 +177,9 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method st
 	}
 	if method != http.MethodGet && method != http.MethodPost {
 		return nil, fmt.Errorf("invalid tokenhive logical method")
+	}
+	if err := validateTokenHiveSourceOperation(sourceOperation); err != nil {
+		return nil, err
 	}
 	parsedRawURL, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || parsedRawURL.Scheme == "" || parsedRawURL.Host == "" {
@@ -136,17 +193,19 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method st
 	_, _ = mac.Write([]byte(tokenHiveTenantKeyMessagePrefix + strconv.FormatInt(apiKeyRecordID, 10)))
 	tenantKey := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
-	headers := make(http.Header, 6)
+	headers := make(http.Header, 8)
 	headers.Set(TokenHiveHeaderRequestID, ResolveUsageBillingRequestID(ctx, ""))
 	headers.Set(TokenHiveHeaderRawURL, parsedRawURL.String())
 	headers.Set(TokenHiveHeaderUpstreamType, account.UpstreamType)
 	headers.Set(TokenHiveHeaderUpstreamModel, upstreamModel)
 	headers.Set(TokenHiveHeaderTenantKey, tenantKey)
 	headers.Set(TokenHiveHeaderMethod, method)
+	headers.Set(TokenHiveHeaderSourceOperation, sourceOperation)
+	headers.Set(TokenHiveHeaderStream, strconv.FormatBool(stream))
 	return headers, nil
 }
 
-func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *TokenHiveAccount, apiKeyRecordID int64, upstreamModel string, req *http.Request) error {
+func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *TokenHiveAccount, apiKeyRecordID int64, upstreamModel string, stream bool, sourceOperation string, req *http.Request) error {
 	if cfg == nil || !cfg.TokenHive.Enabled || account == nil || req == nil {
 		return nil
 	}
@@ -155,7 +214,7 @@ func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *Tok
 		return err
 	}
 	logicalMethod := req.Method
-	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, logicalMethod, req.URL.String(), upstreamModel, *account, key)
+	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, logicalMethod, req.URL.String(), upstreamModel, stream, sourceOperation, *account, key)
 	if err != nil {
 		return err
 	}
@@ -313,16 +372,28 @@ func (s *GatewayService) prepareTokenHiveAnthropicHandoff(
 			}
 		}
 	}
-	deleteHeaderAllForms(req.Header, "authorization")
-	deleteHeaderAllForms(req.Header, "x-api-key")
-	deleteHeaderAllForms(req.Header, "cookie")
+	stripTokenHiveProviderCredentials(req.Header)
 	if getHeaderRaw(req.Header, "content-type") == "" {
 		setHeaderRaw(req.Header, "content-type", "application/json")
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, mappedAccount, getAPIKeyIDFromContext(c), upstreamModel, req); err != nil {
+	sourceOperation := SourceOperationAnthropicMessagesCountTokens
+	if logicalRoute == "messages" {
+		sourceOperation = SourceOperationAnthropicMessagesCreate
+		if parsed.Stream {
+			sourceOperation = SourceOperationAnthropicMessagesStream
+		}
+	}
+	stream := logicalRoute == "messages" && parsed.Stream
+	if err := applyTokenHiveHandoff(ctx, s.cfg, mappedAccount, getAPIKeyIDFromContext(c), upstreamModel, stream, sourceOperation, req); err != nil {
 		return nil, true, fmt.Errorf("build tokenhive anthropic handoff: %w", err)
 	}
 	return &tokenHiveAnthropicHandoff{request: req, originalModel: originalModel, upstreamModel: upstreamModel, stream: parsed.Stream}, true, nil
+}
+
+func stripTokenHiveProviderCredentials(headers http.Header) {
+	deleteHeaderAllForms(headers, "authorization")
+	deleteHeaderAllForms(headers, "x-api-key")
+	deleteHeaderAllForms(headers, "cookie")
 }
 
 func (s *GatewayService) forwardTokenHiveAnthropicMessages(

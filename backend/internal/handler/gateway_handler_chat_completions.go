@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -200,6 +199,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 		}
 		account := selection.Account
+		responsePolicy := h.gatewayService.ResolveTokenHiveResponsePolicy(account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
 		// 4. Acquire account concurrency slot
@@ -232,6 +232,11 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 				accountReleaseFunc()
 			}
 			reqLog.Debug("gateway.cc.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			if responsePolicy.Dedicated {
+				reqLog.Warn("gateway.cc.tokenhive_profit_veto_terminal", zap.Int64("account_id", account.ID))
+				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage)
+				return
+			}
 			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
 				reqLog.Warn("gateway.cc.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
 				h.chatCompletionsErrorResponse(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage)
@@ -240,6 +245,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 			continue
 		}
 		account = latest
+		responsePolicy = h.gatewayService.ResolveTokenHiveResponsePolicy(account)
 		selection.Account = latest
 		if selection.ProfitGateActive() {
 			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, selectionSessionHash, account.ID); err != nil {
@@ -292,8 +298,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 
 		if err != nil {
-			var failoverErr *service.UpstreamFailoverError
-			if errors.As(err, &failoverErr) {
+			if failoverErr, allowFailover := gatewayFailoverForPolicy(err, responsePolicy); allowFailover {
 				if c.Writer.Size() != writerSizeBeforeForward {
 					h.handleCCFailoverExhausted(c, failoverErr, true)
 					return

@@ -815,7 +815,12 @@ func (s *OpenAIGatewayService) ForwardWithResponsePolicy(ctx context.Context, c 
 			}
 			return nil, err
 		}
-		if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, upstreamReq); err != nil {
+		sourceOperation := SourceOperationOpenAIResponsesHTTP
+		if isCompactRequest {
+			sourceOperation = SourceOperationOpenAIResponsesCompact
+		}
+		stream := reqStream && !isCompactRequest
+		if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, stream, sourceOperation, upstreamReq); err != nil {
 			if headerGuard != nil {
 				headerGuard.close()
 			}

@@ -630,6 +630,17 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	writeError compatErrorWriter,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
+	return s.handleCompatErrorResponseWithPolicy(resp, c, account, writeError, ordinaryTokenHiveResponsePolicy(), requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleCompatErrorResponseWithPolicy(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	writeError compatErrorWriter,
+	policy TokenHiveResponsePolicy,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(context.Background(), account, body)
 
@@ -721,8 +732,8 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	if len(requestedModel) > 0 {
 		modelForCooldown = requestedModel[0]
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(
-		c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
+	shouldDisable := s.handleOpenAIAccountUpstreamErrorWithPolicy(
+		c.Request.Context(), account, resp.StatusCode, resp.Header, body, policy, modelForCooldown,
 	)
 	kind := "http_error"
 	if shouldDisable {

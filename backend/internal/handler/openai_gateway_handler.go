@@ -1097,6 +1097,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		responsePolicy := h.gatewayService.ResolveTokenHiveResponsePolicy(account)
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_messages.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision
@@ -1104,6 +1105,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
 		if slotResult == openAISlotAcquireProfitVetoed {
+			if responsePolicy.Dedicated {
+				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount+1)
+				return
+			}
 			// 利润终检否决：排除该账号重新选号，全池耗尽由下一轮选号报错；
 			// 否决次数达上限则直接终止，避免排队抢槽后才终检的延迟放大。
 			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
@@ -1154,8 +1159,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					zap.Error(err),
 				)
 			} else {
-				var failoverErr *service.UpstreamFailoverError
-				if errors.As(err, &failoverErr) {
+				if failoverErr, allowFailover := gatewayFailoverForPolicy(err, responsePolicy); allowFailover {
 					if failoverClientGone(c) {
 						reqLog.Info("openai_messages.failover_aborted_client_disconnected",
 							zap.Int64("account_id", account.ID),
@@ -1167,15 +1171,15 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, true)
 						return
 					}
-					if failoverErr.ShouldReportAccountScheduleFailure() {
-						h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), false, nil)
+					if responsePolicy.AllowSchedulerFeedback && failoverErr.ShouldReportAccountScheduleFailure() {
+						h.gatewayService.ReportOpenAIAccountScheduleResultWithPolicy(responsePolicy, account.ID, account.GetMappedModel(currentRoutingModel), false, nil)
 					}
 					if !failoverErr.ShouldRetryNextAccount() {
 						h.handleAnthropicFailoverExhausted(c, failoverErr, streamStarted)
 						return
 					}
 					// 池模式：同账号重试
-					if failoverErr.RetryableOnSameAccount {
+					if responsePolicy.AllowSameAccountRetry && failoverErr.RetryableOnSameAccount {
 						retryLimit := account.GetPoolModeRetryCount()
 						if sameAccountRetryCount[account.ID] < retryLimit {
 							sameAccountRetryCount[account.ID]++
@@ -1193,7 +1197,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 							continue
 						}
 					}
-					h.gatewayService.RecordOpenAIAccountSwitch()
+					h.gatewayService.RecordOpenAIAccountSwitchWithPolicy(responsePolicy)
 					failedAccountIDs[account.ID] = struct{}{}
 					lastFailoverErr = failoverErr
 					if switchCount >= maxAccountSwitches {
@@ -1220,7 +1224,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					)
 					return
 				}
-				h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), false, nil)
+				h.gatewayService.ReportOpenAIAccountScheduleResultWithPolicy(responsePolicy, account.ID, account.GetMappedModel(currentRoutingModel), false, nil)
 				wroteFallback := h.ensureAnthropicErrorResponse(c, streamStarted)
 				reqLog.Warn("openai_messages.forward_failed",
 					zap.Int64("account_id", account.ID),
@@ -1231,9 +1235,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			}
 		}
 		if result != nil {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, result.FirstTokenMs)
+			h.gatewayService.ReportOpenAIAccountScheduleResultWithPolicy(responsePolicy, account.ID, account.GetMappedModel(currentRoutingModel), true, result.FirstTokenMs)
 		} else {
-			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(currentRoutingModel), true, nil)
+			h.gatewayService.ReportOpenAIAccountScheduleResultWithPolicy(responsePolicy, account.ID, account.GetMappedModel(currentRoutingModel), true, nil)
 		}
 
 		userAgent := c.GetHeader("User-Agent")

@@ -60,23 +60,25 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	if tokenHiveAccount == nil && account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	if err := s.ensureOpenAIAlphaSearchAuthMetadata(ctx, account, token, proxyURL); err != nil {
-		return nil, err
-	}
+	if tokenHiveAccount == nil {
+		if err := s.ensureOpenAIAlphaSearchAuthMetadata(ctx, account, token, proxyURL); err != nil {
+			return nil, err
+		}
 
-	// Codex Personal Access Token（at-...）目前可访问 ChatGPT Codex
-	// /responses，但会被 standalone /alpha/search 的 access enforcement
-	// 拒绝为 no_matching_rule。对 PAT 账号使用等价的 hosted web_search
-	// Responses 路径兜底，避免把可用账号误判为搜索不可用。
-	if account.IsOpenAIPersonalAccessToken() {
-		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
+		// Codex Personal Access Token（at-...）目前可访问 ChatGPT Codex
+		// /responses，但会被 standalone /alpha/search 的 access enforcement
+		// 拒绝为 no_matching_rule。对普通 PAT 账号使用等价的 hosted web_search
+		// Responses 路径兜底；TokenHive 映射账号始终使用 canonical alpha/search。
+		if account.IsOpenAIPersonalAccessToken() {
+			return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
+		}
 	}
 
 	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, body, token)
 	if err != nil {
 		return nil, err
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, req); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, false, SourceOperationOpenAIAlphaSearch, req); err != nil {
 		return nil, fmt.Errorf("build tokenhive alpha search handoff: %w", err)
 	}
 

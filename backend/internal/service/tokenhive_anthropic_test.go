@@ -215,6 +215,117 @@ func TestTokenHiveAnthropicDedicatedPolicyIsOneAttemptWithoutAccountMutation(t *
 	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
 }
 
+func TestTokenHiveAnthropicCompatibilityHandoffStripsCredentialsAndDisablesFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name   string
+		path   string
+		body   []byte
+		invoke func(*GatewayService, *gin.Context, *Account, []byte) (*ForwardResult, error)
+	}{
+		{
+			name: "chat completions",
+			path: "/v1/chat/completions",
+			body: []byte(`{"model":"claude-sonnet-4","stream":false,"messages":[{"role":"user","content":"hello"}]}`),
+			invoke: func(s *GatewayService, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+				return s.ForwardAsChatCompletions(context.Background(), c, account, body, nil)
+			},
+		},
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: []byte(`{"model":"claude-sonnet-4","stream":false,"input":"hello"}`),
+			invoke: func(s *GatewayService, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+				return s.ForwardAsResponses(context.Background(), c, account, body, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &tokenHiveAnthropicUpstream{response: &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "Retry-After": []string{"60"}},
+				Body:       io.NopCloser(bytes.NewBufferString(`{"type":"error","error":{"type":"rate_limit_error","message":"retry me"}}`)),
+			}}
+			svc, account, c, recorder := newTokenHiveAnthropicService(t, upstream)
+			c.Request.URL.Path = tt.path
+			repo := &tokenHivePolicyAccountRepo{}
+			svc.rateLimitService = NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+			result, err := tt.invoke(svc, c, account, tt.body)
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			var failoverErr *UpstreamFailoverError
+			require.False(t, errors.As(err, &failoverErr))
+			require.Equal(t, 1, upstream.calls)
+			require.NotNil(t, upstream.request)
+			require.Empty(t, getHeaderRaw(upstream.request.Header, "authorization"))
+			require.Empty(t, getHeaderRaw(upstream.request.Header, "x-api-key"))
+			require.Empty(t, getHeaderRaw(upstream.request.Header, "cookie"))
+			require.NotContains(t, fmt.Sprint(upstream.request.Header), "VIRTUAL_ACCOUNT_SECRET")
+			require.Zero(t, repo.tempUnschedulable)
+			require.Zero(t, repo.setError)
+			require.Zero(t, repo.rateLimited)
+			require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+		})
+	}
+}
+
+func TestOrdinaryAnthropicCompatibilityPreservesFailover(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name   string
+		path   string
+		body   []byte
+		invoke func(*GatewayService, *gin.Context, *Account, []byte) (*ForwardResult, error)
+	}{
+		{
+			name: "chat completions",
+			path: "/v1/chat/completions",
+			body: []byte(`{"model":"claude-sonnet-4","stream":false,"messages":[{"role":"user","content":"hello"}]}`),
+			invoke: func(s *GatewayService, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+				return s.ForwardAsChatCompletions(context.Background(), c, account, body, nil)
+			},
+		},
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: []byte(`{"model":"claude-sonnet-4","stream":false,"input":"hello"}`),
+			invoke: func(s *GatewayService, c *gin.Context, account *Account, body []byte) (*ForwardResult, error) {
+				return s.ForwardAsResponses(context.Background(), c, account, body, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			upstream := &tokenHiveAnthropicUpstream{response: &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Content-Type": []string{"application/json"}, "Retry-After": []string{"60"}},
+				Body:       io.NopCloser(bytes.NewBufferString(`{"type":"error","error":{"type":"rate_limit_error","message":"retry me"}}`)),
+			}}
+			svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
+			svc.cfg = &config.Config{}
+			svc.tokenHiveRegistry = nil
+			c.Request.URL.Path = tt.path
+			repo := &tokenHivePolicyAccountRepo{}
+			svc.rateLimitService = NewRateLimitService(repo, nil, svc.cfg, nil, nil)
+
+			result, err := tt.invoke(svc, c, account, tt.body)
+
+			require.Error(t, err)
+			require.Nil(t, result)
+			var failoverErr *UpstreamFailoverError
+			require.True(t, errors.As(err, &failoverErr))
+			require.Equal(t, 1, upstream.calls)
+			require.Greater(t, repo.rateLimited, 0)
+			require.Equal(t, "VIRTUAL_ACCOUNT_SECRET", getHeaderRaw(upstream.request.Header, "x-api-key"))
+		})
+	}
+}
+
 func TestTokenHiveAnthropicStreamReadErrorDoesNotFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	upstream := &tokenHiveAnthropicUpstream{response: &http.Response{
