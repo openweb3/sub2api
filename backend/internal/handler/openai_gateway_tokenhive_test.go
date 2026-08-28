@@ -340,9 +340,32 @@ func runTokenHiveResponsePolicyRequest(t *testing.T, h *OpenAIGatewayHandler) *h
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	c.Request = req
-	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 11, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI}, User: &service.User{ID: 12}})
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 11, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowMessagesDispatch: true}, User: &service.User{ID: 12}})
 	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 12})
 	h.Responses(c)
+	return rec
+}
+
+func runTokenHiveOpenAICompatibilityPolicyRequest(t *testing.T, h *OpenAIGatewayHandler, endpoint string) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	groupID := int64(91)
+	body := `{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}]}`
+	if endpoint == "/v1/messages" {
+		body = `{"model":"gpt-5.4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`
+	}
+	req := httptest.NewRequest(http.MethodPost, endpoint, bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = req
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{ID: 11, GroupID: &groupID, Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, AllowMessagesDispatch: true}, User: &service.User{ID: 12}})
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 12})
+	if endpoint == "/v1/messages" {
+		h.Messages(c)
+	} else {
+		h.ChatCompletions(c)
+	}
 	return rec
 }
 
@@ -621,6 +644,35 @@ func TestTokenHiveResponsePolicyDedicatedFailureStimuliDoNotRetry(t *testing.T) 
 			_ = runTokenHiveResponsePolicyRequest(t, h)
 			require.Equal(t, 1, upstream.callCount(), "dedicated %s must make at most one upstream attempt", mode)
 			require.Equal(t, 1, repo.selectionCount(), "dedicated %s must not reselect an account", mode)
+		})
+	}
+}
+
+func TestTokenHiveOpenAICompatibilityHandlersDoNotRetryResponseFailed(t *testing.T) {
+	for _, endpoint := range []string{"/v1/chat/completions", "/v1/messages"} {
+		t.Run(endpoint, func(t *testing.T) {
+			upstream := &tokenHiveHandlerUpstream{mode: "response_failed"}
+			h, repo, _ := newTokenHiveResponsePolicyHandlerWithUpstream(t, true, upstream)
+
+			recorder := runTokenHiveOpenAICompatibilityPolicyRequest(t, h, endpoint)
+
+			require.Equal(t, 1, upstream.callCount(), "status=%d body=%s", recorder.Code, recorder.Body.String())
+			require.Equal(t, []int64{1}, upstream.accounts())
+			require.Equal(t, 1, repo.selectionCount())
+		})
+	}
+}
+
+func TestOrdinaryOpenAICompatibilityHandlersPreserveFailover(t *testing.T) {
+	for _, endpoint := range []string{"/v1/chat/completions", "/v1/messages"} {
+		t.Run(endpoint, func(t *testing.T) {
+			h, repo, upstream := newTokenHiveResponsePolicyHandler(t, false)
+
+			recorder := runTokenHiveOpenAICompatibilityPolicyRequest(t, h, endpoint)
+
+			require.Greater(t, upstream.callCount(), 1, "status=%d body=%s", recorder.Code, recorder.Body.String())
+			require.Greater(t, repo.selectionCount(), 1)
+			require.Contains(t, upstream.accounts(), int64(2))
 		})
 	}
 }

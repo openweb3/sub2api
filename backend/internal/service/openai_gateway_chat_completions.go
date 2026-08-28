@@ -88,6 +88,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if tokenHiveErr != nil {
 		return nil, fmt.Errorf("resolve tokenhive account: %w", tokenHiveErr)
 	}
+	responsePolicy := s.ResolveTokenHiveResponsePolicy(account)
 
 	// 入口分流：APIKey 账号 + 强制或已探测确认上游不支持 Responses，走 CC 直转。
 	// 自动模式下标记缺失（未探测）按"现状即证据"原则继续走下方原 Responses 转换路径。
@@ -279,7 +280,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
+		return nil, s.handleOpenAIUpstreamTransportErrorWithPolicy(ctx, c, account, err, false, responsePolicy)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -303,10 +304,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			)
 			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 		}
-		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
+		if handled, executionErr := handleTokenHiveExecutionErrorResponse(resp, c, account, respBody, responsePolicy, false); handled {
+			return nil, executionErr
+		}
+		if foErr := s.failoverOpenAIUpstreamHTTPErrorWithPolicy(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, responsePolicy); foErr != nil {
 			return nil, foErr
 		}
-		return s.handleChatCompletionsErrorResponse(resp, c, account, billingModel)
+		return s.handleChatCompletionsErrorResponseWithPolicy(resp, c, account, responsePolicy, billingModel)
 	}
 
 	// 9. Handle normal response
@@ -401,6 +405,16 @@ func (s *OpenAIGatewayService) handleChatCompletionsErrorResponse(
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	return s.handleCompatErrorResponse(resp, c, account, writeChatCompletionsError, requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleChatCompletionsErrorResponseWithPolicy(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	policy TokenHiveResponsePolicy,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
+	return s.handleCompatErrorResponseWithPolicy(resp, c, account, writeChatCompletionsError, policy, requestedModel...)
 }
 
 // handleChatBufferedStreamingResponse reads all Responses SSE events from the

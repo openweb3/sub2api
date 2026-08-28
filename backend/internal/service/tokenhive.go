@@ -372,9 +372,7 @@ func (s *GatewayService) prepareTokenHiveAnthropicHandoff(
 			}
 		}
 	}
-	deleteHeaderAllForms(req.Header, "authorization")
-	deleteHeaderAllForms(req.Header, "x-api-key")
-	deleteHeaderAllForms(req.Header, "cookie")
+	stripTokenHiveProviderCredentials(req.Header)
 	if getHeaderRaw(req.Header, "content-type") == "" {
 		setHeaderRaw(req.Header, "content-type", "application/json")
 	}
@@ -390,6 +388,12 @@ func (s *GatewayService) prepareTokenHiveAnthropicHandoff(
 		return nil, true, fmt.Errorf("build tokenhive anthropic handoff: %w", err)
 	}
 	return &tokenHiveAnthropicHandoff{request: req, originalModel: originalModel, upstreamModel: upstreamModel, stream: parsed.Stream}, true, nil
+}
+
+func stripTokenHiveProviderCredentials(headers http.Header) {
+	deleteHeaderAllForms(headers, "authorization")
+	deleteHeaderAllForms(headers, "x-api-key")
+	deleteHeaderAllForms(headers, "cookie")
 }
 
 func (s *GatewayService) forwardTokenHiveAnthropicMessages(

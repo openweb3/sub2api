@@ -127,6 +127,10 @@ func (s *GatewayService) ForwardAsResponses(
 	if err != nil {
 		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
 	}
+	responsePolicy := s.ResolveTokenHiveResponsePolicy(account)
+	if tokenHiveAccount != nil {
+		stripTokenHiveProviderCredentials(upstreamReq.Header)
+	}
 	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), mappedModel, reqStream, SourceOperationAnthropicMessagesStream, upstreamReq); err != nil {
 		return nil, fmt.Errorf("build tokenhive responses compatibility handoff: %w", err)
 	}
@@ -164,8 +168,11 @@ func (s *GatewayService) ForwardAsResponses(
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if handled, executionErr := handleTokenHiveExecutionErrorResponse(resp, c, account, respBody, responsePolicy, false); handled {
+			return nil, executionErr
+		}
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		if responsePolicy.AllowAccountFailover && s.shouldFailoverUpstreamError(resp.StatusCode) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -175,7 +182,7 @@ func (s *GatewayService) ForwardAsResponses(
 				Kind:               "failover",
 				Message:            upstreamMsg,
 			})
-			if s.rateLimitService != nil {
+			if responsePolicy.AllowAccountMutation && s.rateLimitService != nil {
 				s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
 			return nil, &UpstreamFailoverError{
