@@ -620,7 +620,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	if parsed.IsEdits() {
 		sourceOperation = SourceOperationOpenAIImagesEdits
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, sourceOperation, upstreamReq); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, parsed.Stream, sourceOperation, upstreamReq); err != nil {
 		return nil, fmt.Errorf("build tokenhive images handoff: %w", err)
 	}
 	policy := s.ResolveTokenHiveResponsePolicy(account)

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -43,7 +45,7 @@ func TestTokenHiveHandoffCarriesLogicalMethodAndForcesLoopbackPOST(t *testing.T)
 			}
 			req := httptest.NewRequest(method, "https://api.openai.com/v1/fixture", bytes.NewReader(body))
 			req.Header.Add("X-TokenHive-Method", "FORGED")
-			if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "fixture-model", SourceOperationOpenAIResponsesHTTP, req); err != nil {
+			if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "fixture-model", false, SourceOperationOpenAIResponsesHTTP, req); err != nil {
 				t.Fatal(err)
 			}
 			if req.Method != http.MethodPost || req.Header.Get("X-TokenHive-Method") != method || len(req.Header.Values("X-TokenHive-Method")) != 1 {
@@ -84,7 +86,7 @@ func TestTokenHiveMetadataSourceOperationExactSet(t *testing.T) {
 	key := []byte("slice-1-test-tenant-hmac-key-32bytes")
 	for operation := range want {
 		t.Run(operation, func(t *testing.T) {
-			headers, err := BuildTokenHiveMetadata(context.Background(), 7, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", operation, account, key)
+			headers, err := BuildTokenHiveMetadata(context.Background(), 7, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", false, operation, account, key)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +98,7 @@ func TestTokenHiveMetadataSourceOperationExactSet(t *testing.T) {
 
 	for _, operation := range []string{"", " openai.responses.http", "openai.responses.http ", "OPENAI.RESPONSES.HTTP", "openai.responses"} {
 		t.Run("reject_"+operation, func(t *testing.T) {
-			if _, err := BuildTokenHiveMetadata(context.Background(), 7, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", operation, account, key); err == nil {
+			if _, err := BuildTokenHiveMetadata(context.Background(), 7, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", false, operation, account, key); err == nil {
 				t.Fatalf("BuildTokenHiveMetadata accepted invalid source operation %q", operation)
 			}
 		})
@@ -115,12 +117,13 @@ func TestApplyTokenHiveHandoffStripsForgedHeaders(t *testing.T) {
 		"X-TokenHive-Tenant-Key":          []string{"forged-key"},
 		"x-tokenhive-method":              []string{"DELETE"},
 		"X-TOKENHIVE-SOURCE-OPERATION":    []string{"forged-operation"},
+		"X-TokenHive-Stream":              []string{"forged-stream"},
 		"x-ToKeNhIvE-Untrusted-Extension": []string{"forged-extra"},
 	}
 	for name, values := range forgedHeaders {
 		req.Header[name] = values
 	}
-	if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "gpt-5.4", SourceOperationOpenAIResponsesHTTP, req); err != nil {
+	if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "gpt-5.4", false, SourceOperationOpenAIResponsesHTTP, req); err != nil {
 		t.Fatal(err)
 	}
 
@@ -130,6 +133,7 @@ func TestApplyTokenHiveHandoffStripsForgedHeaders(t *testing.T) {
 		TokenHiveHeaderUpstreamModel:   "gpt-5.4",
 		TokenHiveHeaderMethod:          http.MethodPost,
 		TokenHiveHeaderSourceOperation: SourceOperationOpenAIResponsesHTTP,
+		"X-TokenHive-Stream":           "false",
 	}
 	tokenHiveHeaders := 0
 	for name := range req.Header {
@@ -140,8 +144,8 @@ func TestApplyTokenHiveHandoffStripsForgedHeaders(t *testing.T) {
 			t.Fatalf("forged TokenHive header survived: %s", name)
 		}
 	}
-	if tokenHiveHeaders != 7 {
-		t.Fatalf("TokenHive header count = %d, want 7", tokenHiveHeaders)
+	if tokenHiveHeaders != 8 {
+		t.Fatalf("TokenHive header count = %d, want 8", tokenHiveHeaders)
 	}
 	for name, wantValue := range trusted {
 		if got := req.Header.Values(name); len(got) != 1 || got[0] != wantValue {
@@ -166,7 +170,7 @@ func TestApplyTokenHiveHandoffStripsDuplicateAndAliasedForgedHeaders(t *testing.
 	req.Header[TokenHiveHeaderRequestID] = []string{forgedValues[4], forgedValues[5]}
 	req.Header["x-ToKeNhIvE-rEqUeSt-Id"] = []string{forgedValues[6], forgedValues[7]}
 
-	if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "gpt-5.4", SourceOperationOpenAIResponsesHTTP, req); err != nil {
+	if err := applyTokenHiveHandoff(context.Background(), cfg, mapped, 7, "gpt-5.4", false, SourceOperationOpenAIResponsesHTTP, req); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,8 +193,8 @@ func TestApplyTokenHiveHandoffStripsDuplicateAndAliasedForgedHeaders(t *testing.
 			}
 		}
 	}
-	if tokenHiveHeaders != 7 {
-		t.Fatalf("TokenHive header count = %d, want 7", tokenHiveHeaders)
+	if tokenHiveHeaders != 8 {
+		t.Fatalf("TokenHive header count = %d, want 8", tokenHiveHeaders)
 	}
 }
 
@@ -267,7 +271,7 @@ func TestTokenHiveMetadataUsesUsageBillingRequestID(t *testing.T) {
 		t.Fatal("registry did not match dedicated account")
 	}
 	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-client-stable-123")
-	headers, err := BuildTokenHiveMetadata(ctx, 99, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", SourceOperationOpenAIResponsesHTTP, account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
+	headers, err := BuildTokenHiveMetadata(ctx, 99, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", false, SourceOperationOpenAIResponsesHTTP, account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +293,7 @@ func TestTokenHiveTenantKeyVector(t *testing.T) {
 	if !ok {
 		t.Fatal("registry did not match dedicated account")
 	}
-	headers, err := BuildTokenHiveMetadata(context.Background(), 42, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", SourceOperationOpenAIResponsesHTTP, account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
+	headers, err := BuildTokenHiveMetadata(context.Background(), 42, http.MethodPost, "https://api.openai.com/v1/responses", "gpt-5.4", false, SourceOperationOpenAIResponsesHTTP, account, []byte("slice-1-test-tenant-hmac-key-32bytes"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,6 +319,7 @@ type sourceOperationCase struct {
 	operation string
 	rawURL    string
 	method    string
+	stream    bool
 	invoke    func(*testing.T, *handoffRecorder)
 }
 
@@ -364,7 +369,7 @@ func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
 		},
 		{
 			name: "anthropic messages stream", operation: SourceOperationAnthropicMessagesStream,
-			rawURL: claudeAPIURL, method: http.MethodPost,
+			rawURL: claudeAPIURL, method: http.MethodPost, stream: true,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
 				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
@@ -396,6 +401,15 @@ func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
 				body := []byte(`{"model":"gpt-5.4","stream":false,"input":"hello"}`)
+				_, _ = newOpenAIService(upstream).Forward(context.Background(), newOpenAIContext("/v1/responses", body), openAIAccount, body)
+			},
+		},
+		{
+			name: "openai responses http stream", operation: SourceOperationOpenAIResponsesHTTP,
+			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost, stream: true,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-5.4","stream":true,"input":"hello"}`)
 				_, _ = newOpenAIService(upstream).Forward(context.Background(), newOpenAIContext("/v1/responses", body), openAIAccount, body)
 			},
 		},
@@ -433,6 +447,21 @@ func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
 			},
 		},
 		{
+			name: "openai images generations stream", operation: SourceOperationOpenAIImagesGenerations,
+			rawURL: "https://api.openai.com/v1/images/generations", method: http.MethodPost, stream: true,
+			invoke: func(t *testing.T, upstream *handoffRecorder) {
+				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
+				body := []byte(`{"model":"gpt-image-2","prompt":"draw","stream":true}`)
+				c := newOpenAIContext("/v1/images/generations", body)
+				svc := newOpenAIService(upstream)
+				parsed, parseErr := svc.ParseOpenAIImagesRequest(c, body)
+				if parseErr != nil {
+					t.Fatal(parseErr)
+				}
+				_, _ = svc.ForwardImages(context.Background(), c, openAIAccount, body, parsed, "")
+			},
+		},
+		{
 			name: "openai images edits", operation: SourceOperationOpenAIImagesEdits,
 			rawURL: "https://api.openai.com/v1/images/edits", method: http.MethodPost,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
@@ -449,11 +478,11 @@ func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
 		},
 		{
 			name: "openai alpha search", operation: SourceOperationOpenAIAlphaSearch,
-			rawURL: "https://api.openai.com/v1/alpha/search?feature=standalone", method: http.MethodPost,
+			rawURL: "https://api.openai.com/v1/alpha/search", method: http.MethodPost,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
 				body := []byte(`{"model":"gpt-5.6-sol","commands":{"search_query":[{"q":"news"}]}}`)
-				_, _ = newOpenAIService(upstream).ForwardAlphaSearch(context.Background(), newOpenAIContext("/v1/alpha/search?feature=standalone", body), openAIAccount, body)
+				_, _ = newOpenAIService(upstream).ForwardAlphaSearch(context.Background(), newOpenAIContext("/v1/alpha/search", body), openAIAccount, body)
 			},
 		},
 		{
@@ -466,9 +495,6 @@ func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
 		},
 	}
 
-	if len(tests) != len(tokenHiveSourceOperations) {
-		t.Fatalf("matrix rows = %d, source operations = %d", len(tests), len(tokenHiveSourceOperations))
-	}
 	seen := make(map[string]struct{}, len(tests))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -488,6 +514,9 @@ func TestTokenHiveHTTPSourceOperationMatrix(t *testing.T) {
 			}
 			if got := upstream.lastReq.Header.Get(TokenHiveHeaderMethod); got != tt.method {
 				t.Fatalf("logical method = %q, want %q", got, tt.method)
+			}
+			if got, want := upstream.lastReq.Header.Values("X-TokenHive-Stream"), []string{strconv.FormatBool(tt.stream)}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("stream values = %q, want %q", got, want)
 			}
 			if upstream.lastProxyURL != "" || len(upstream.requests) != 1 {
 				t.Fatalf("proxy URL = %q, upstream calls = %d, want direct and one", upstream.lastProxyURL, len(upstream.requests))
@@ -527,7 +556,7 @@ func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
 	tests := []sourceOperationCase{
 		{
 			name: "chat completions converts to OpenAI Responses", operation: SourceOperationOpenAIResponsesHTTP,
-			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost,
+			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost, stream: true,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
 				body := []byte(`{"model":"gpt-5.4","stream":false,"messages":[{"role":"user","content":"hello"}]}`)
@@ -536,7 +565,7 @@ func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
 		},
 		{
 			name: "OpenAI compatible Messages converts to Responses", operation: SourceOperationOpenAIResponsesHTTP,
-			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost,
+			rawURL: "https://api.openai.com/v1/responses", method: http.MethodPost, stream: true,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"error":{"message":"captured"}}`)
 				body := []byte(`{"model":"gpt-5.4","stream":false,"max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`)
@@ -545,7 +574,7 @@ func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
 		},
 		{
 			name: "Anthropic compatible Chat Completions forces Messages stream", operation: SourceOperationAnthropicMessagesStream,
-			rawURL: claudeAPIURL, method: http.MethodPost,
+			rawURL: claudeAPIURL, method: http.MethodPost, stream: true,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
 				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
@@ -555,7 +584,7 @@ func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
 		},
 		{
 			name: "Anthropic compatible Responses forces Messages stream", operation: SourceOperationAnthropicMessagesStream,
-			rawURL: claudeAPIURL, method: http.MethodPost,
+			rawURL: claudeAPIURL, method: http.MethodPost, stream: true,
 			invoke: func(t *testing.T, upstream *handoffRecorder) {
 				upstream.respond(http.StatusTeapot, "application/json", `{"type":"error","error":{"type":"api_error","message":"captured"}}`)
 				svc, account, c, _ := newTokenHiveAnthropicService(t, upstream)
@@ -583,6 +612,9 @@ func TestTokenHiveCompatibilitySourceOperationMatrix(t *testing.T) {
 			}
 			if got := upstream.lastReq.Header.Get(TokenHiveHeaderMethod); got != tt.method {
 				t.Fatalf("logical method = %q, want %q", got, tt.method)
+			}
+			if got, want := upstream.lastReq.Header.Values("X-TokenHive-Stream"), []string{strconv.FormatBool(tt.stream)}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("stream values = %q, want %q", got, want)
 			}
 			if upstream.lastProxyURL != "" || len(upstream.requests) != 1 {
 				t.Fatalf("proxy URL = %q, upstream calls = %d, want direct and one", upstream.lastProxyURL, len(upstream.requests))

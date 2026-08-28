@@ -50,7 +50,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifestForClient(
 	if value := strings.TrimSpace(ifNoneMatch); value != "" {
 		req.Header.Set("If-None-Match", value)
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, mapped, apiKeyRecordID, CapabilityOpenAICodexModelsManifest, SourceOperationOpenAICodexModelsManifest, req); err != nil {
+	if err := applyTokenHiveHandoff(ctx, s.cfg, mapped, apiKeyRecordID, CapabilityOpenAICodexModelsManifest, false, SourceOperationOpenAICodexModelsManifest, req); err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_CODEX_MODELS_TOKENHIVE_HANDOFF_FAILED", "prepare TokenHive Codex models handoff: %v", err)
 	}
 	if s.httpUpstream == nil {

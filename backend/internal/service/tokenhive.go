@@ -32,6 +32,7 @@ const (
 	TokenHiveHeaderTenantKey                    = "X-TokenHive-Tenant-Key"
 	TokenHiveHeaderMethod                       = "X-TokenHive-Method"
 	TokenHiveHeaderSourceOperation              = "X-TokenHive-Source-Operation"
+	TokenHiveHeaderStream                       = "X-TokenHive-Stream"
 	SourceOperationAnthropicMessagesCreate      = "anthropic.messages.create"
 	SourceOperationAnthropicMessagesStream      = "anthropic.messages.stream"
 	SourceOperationAnthropicMessagesCountTokens = "anthropic.messages.count_tokens"
@@ -164,7 +165,7 @@ func validateTokenHiveSourceOperation(value string) error {
 	return nil
 }
 
-func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method string, rawURL string, upstreamModel string, sourceOperation string, account TokenHiveAccount, key []byte) (http.Header, error) {
+func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method string, rawURL string, upstreamModel string, stream bool, sourceOperation string, account TokenHiveAccount, key []byte) (http.Header, error) {
 	if apiKeyRecordID <= 0 {
 		return nil, fmt.Errorf("tokenhive API key record ID must be positive")
 	}
@@ -192,7 +193,7 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method st
 	_, _ = mac.Write([]byte(tokenHiveTenantKeyMessagePrefix + strconv.FormatInt(apiKeyRecordID, 10)))
 	tenantKey := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
-	headers := make(http.Header, 7)
+	headers := make(http.Header, 8)
 	headers.Set(TokenHiveHeaderRequestID, ResolveUsageBillingRequestID(ctx, ""))
 	headers.Set(TokenHiveHeaderRawURL, parsedRawURL.String())
 	headers.Set(TokenHiveHeaderUpstreamType, account.UpstreamType)
@@ -200,10 +201,11 @@ func BuildTokenHiveMetadata(ctx context.Context, apiKeyRecordID int64, method st
 	headers.Set(TokenHiveHeaderTenantKey, tenantKey)
 	headers.Set(TokenHiveHeaderMethod, method)
 	headers.Set(TokenHiveHeaderSourceOperation, sourceOperation)
+	headers.Set(TokenHiveHeaderStream, strconv.FormatBool(stream))
 	return headers, nil
 }
 
-func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *TokenHiveAccount, apiKeyRecordID int64, upstreamModel string, sourceOperation string, req *http.Request) error {
+func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *TokenHiveAccount, apiKeyRecordID int64, upstreamModel string, stream bool, sourceOperation string, req *http.Request) error {
 	if cfg == nil || !cfg.TokenHive.Enabled || account == nil || req == nil {
 		return nil
 	}
@@ -212,7 +214,7 @@ func applyTokenHiveHandoff(ctx context.Context, cfg *config.Config, account *Tok
 		return err
 	}
 	logicalMethod := req.Method
-	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, logicalMethod, req.URL.String(), upstreamModel, sourceOperation, *account, key)
+	metadata, err := BuildTokenHiveMetadata(ctx, apiKeyRecordID, logicalMethod, req.URL.String(), upstreamModel, stream, sourceOperation, *account, key)
 	if err != nil {
 		return err
 	}
@@ -383,7 +385,8 @@ func (s *GatewayService) prepareTokenHiveAnthropicHandoff(
 			sourceOperation = SourceOperationAnthropicMessagesStream
 		}
 	}
-	if err := applyTokenHiveHandoff(ctx, s.cfg, mappedAccount, getAPIKeyIDFromContext(c), upstreamModel, sourceOperation, req); err != nil {
+	stream := logicalRoute == "messages" && parsed.Stream
+	if err := applyTokenHiveHandoff(ctx, s.cfg, mappedAccount, getAPIKeyIDFromContext(c), upstreamModel, stream, sourceOperation, req); err != nil {
 		return nil, true, fmt.Errorf("build tokenhive anthropic handoff: %w", err)
 	}
 	return &tokenHiveAnthropicHandoff{request: req, originalModel: originalModel, upstreamModel: upstreamModel, stream: parsed.Stream}, true, nil
