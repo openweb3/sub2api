@@ -1626,7 +1626,7 @@ func (s *GatewayService) initDebugGatewayBodyFile(path string) {
 		}
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) //nolint:gosec // G703: path comes only from the operator-controlled SUB2API_DEBUG_GATEWAY_BODY startup environment variable
 	if err != nil {
 		slog.Error("failed to open gateway debug log file", "path_present", true, "error_type", fmt.Sprintf("%T", err))
 		return

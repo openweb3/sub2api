@@ -48,10 +48,6 @@ func (s *OpenAIGatewayService) handleStreamingResponse(ctx context.Context, resp
 	return s.handleStreamingResponseWithReasoningAndPolicy(ctx, resp, c, account, startTime, originalModel, mappedModel, "", ordinaryTokenHiveResponsePolicy())
 }
 
-func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string) (*openaiStreamingResult, error) {
-	return s.handleStreamingResponseWithReasoningAndPolicy(ctx, resp, c, account, startTime, originalModel, mappedModel, reasoningEffort, ordinaryTokenHiveResponsePolicy())
-}
-
 func (s *OpenAIGatewayService) handleStreamingResponseWithReasoningAndPolicy(ctx context.Context, resp *http.Response, c *gin.Context, account *Account, startTime time.Time, originalModel, mappedModel, reasoningEffort string, policy TokenHiveResponsePolicy) (*openaiStreamingResult, error) {
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {

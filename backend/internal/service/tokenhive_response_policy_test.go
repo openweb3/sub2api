@@ -686,9 +686,10 @@ func TestTokenHiveResponsePolicySuppressesFirstOutputTimeoutMutation(t *testing.
 			account := &Account{ID: 81, Name: label, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, ProxyID: &proxyID}
 			c := newTokenHivePolicyContext()
 
-			svc.newOpenAIFirstOutputTimeoutErrorWithPolicy(
+			timeoutErr := svc.newOpenAIFirstOutputTimeoutErrorWithPolicy(
 				context.Background(), c, account, time.Now(), "gpt-5.4", "", time.Second, "semantic_output", nil, policy,
 			)
+			require.NotNil(t, timeoutErr)
 
 			if dedicated {
 				require.Zero(t, repo.tempUnschedulable)

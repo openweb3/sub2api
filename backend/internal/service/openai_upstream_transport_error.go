@@ -149,21 +149,6 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportErrorWithPolicy(ctx 
 	}
 }
 
-// tempUnscheduleOpenAITransportError marks an account temporarily unschedulable
-// after a durable transport failure, both persistently (DB, survives restart)
-// and in-memory (immediate scheduler effect before the DB/account cache propagates).
-//
-// Log semantics:
-//   - "openai.account_temp_unscheduled_transport" — emitted ONLY after a
-//     successful DB write (both in-memory + persisted).
-//   - "openai.account_temp_unscheduled_transport_memory_only" — emitted when
-//     accountRepo is nil (in-memory only; no persistence).
-//   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
-//     but returned an error.
-func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
-	s.tempUnscheduleOpenAITransportErrorWithPolicy(ctx, account, safeErr, ordinaryTokenHiveResponsePolicy())
-}
-
 func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportErrorWithPolicy(ctx context.Context, account *Account, safeErr string, policy TokenHiveResponsePolicy) {
 	if s == nil || account == nil {
 		return

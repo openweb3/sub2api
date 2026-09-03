@@ -156,7 +156,7 @@ func TestTempUnscheduleOpenAITransportError_NilAccountRepo_InMemoryBlockOnly(t *
 	svc := &OpenAIGatewayService{accountRepo: nil}
 	account := &Account{ID: 55, Name: "no-db", Platform: PlatformOpenAI}
 
-	svc.tempUnscheduleOpenAITransportError(context.Background(), account, "proxy refused")
+	svc.tempUnscheduleOpenAITransportErrorWithPolicy(context.Background(), account, "proxy refused", ordinaryTokenHiveResponsePolicy())
 
 	// In-memory block must still happen.
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account),
