@@ -73,9 +73,13 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifestForClient(
 		}
 		return nil, newTokenHiveCodexModelsError(fmt.Errorf("TokenHive Codex models upstream error %d: %s", resp.StatusCode, message))
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, codexModelsManifestBodyLimit))
+	bodyLimit := resolveModelsListReadLimit(s.cfg)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, bodyLimit+1))
 	if err != nil {
 		return nil, newTokenHiveCodexModelsError(fmt.Errorf("read TokenHive Codex models response: %w", err))
+	}
+	if int64(len(body)) > bodyLimit {
+		return nil, newTokenHiveCodexModelsError(fmt.Errorf("TokenHive Codex models response exceeds %d bytes", bodyLimit))
 	}
 	if err := validateCodexModelsManifestEnvelope(body); err != nil {
 		return nil, newTokenHiveCodexModelsError(fmt.Errorf("TokenHive Codex models returned an invalid envelope: %w", err))

@@ -4,7 +4,7 @@
 
 # Sub2API
 
-[![Go](https://img.shields.io/badge/Go-1.25.7-00ADD8.svg)](https://golang.org/)
+[![Go](https://img.shields.io/badge/Go-1.27.0-00ADD8.svg)](https://golang.org/)
 [![Vue](https://img.shields.io/badge/Vue-3.4+-4FC08D.svg)](https://vuejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-336791.svg)](https://www.postgresql.org/)
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
@@ -51,7 +51,7 @@
 
 <tr>
 <td width="180"><a href="https://apikey.fun/register?aff=SUB2API"><img src="assets/partners/logos/apikey-fun.png" alt="APIKEY.FUN" width="150"></a></td>
-<td>感谢 APIKEY.FUN 赞助了本项目！<a href="https://apikey.fun/register?aff=SUB2API">APIKEY.FUN</a> 是 sub2api 开源项目的核心贡献者之一，致力于提供开放、稳定、高性价比的 AI API 接入服务。平台支持 Claude、OpenAI、Gemini 等热门模型的 API 中转服务，价格低至官方原价的 7%。通过专属链接 <a href="https://apikey.fun/register?aff=SUB2API">APIKEY</a> 注册，可享受所有充值永久 95 折优惠。</td>
+<td>感谢 APIKEY.FUN 赞助了本项目！<a href="https://apikey.fun/register?aff=SUB2API">APIKEY.FUN</a> 是 sub2api 开源项目的核心贡献者之一，致力于提供开放、稳定、高性价比的 AI API 接入服务。平台支持 Claude、OpenAI、Gemini 等热门模型的 API 中转服务，价格低至官方原价的 7%。通过专属链接 <a href="https://apikey.fun/register?aff=SUB2API">APIKEY</a> 注册，可享受充值最高 95 折优惠。</td>
 </tr>
 
 <tr>
@@ -60,8 +60,8 @@
 </tr>
 
 <tr>
-<td width="180"><a href="https://www.aicodemirror.ai/register?invitecode=KMVZQM"><img src="assets/partners/logos/AICodeMirror.jpg" alt="AICodeMirror" width="150"></a></td>
-<td>感谢 AICodeMirror 赞助了本项目！AICodeMirror 提供 Claude Code / Codex / Gemini CLI 官方高稳定性中转服务，企业级并发、快速开票、7×24 小时专属技术支持。Claude Code / Codex / Gemini 官方通道低至原价 38% / 2% / 9%，充值更享额外折扣！AICodeMirror 为 sub2api 用户提供专属福利：通过<a href="https://www.aicodemirror.ai/register?invitecode=KMVZQM">此链接</a>注册，首次充值立享 8 折优惠，企业客户最高可享 75 折！</td>
+<td width="180"><a href="https://codex-everywhere.com"><img src="assets/partners/logos/codex-everywhere.jpg" alt="CodexEverywhere" width="150"></a></td>
+<td>Real GPT-5.6 series at 3% of OpenAI pricing — <a href="https://codex-everywhere.com">CodexEverywhere</a> is democratizing access to frontier models for developers worldwide. We believe in transparency and honesty, with model quality verified by active community oversight for months. USD and crypto friendly. Start with a free $20 trial at <a href="https://codex-everywhere.com">codex-everywhere.com</a>.</td>
 </tr>
 
 <tr>
@@ -106,16 +106,6 @@
 </tr>
 
 <tr>
-<td width="180"><a href="https://anpin.ai"><img src="assets/partners/logos/anpin.jpg" alt="anpin" width="150"></a></td>
-<td>感谢 <a href="https://anpin.ai">anpin.ai</a> 赞助本项目！anpin.ai 是一家致力于推动 AI 普惠的高端 AI 中转服务平台。我们以先进的技术架构和全球分布式部署，为用户提供直达国际顶尖大模型的高速通道。<br>
-自建一手号池：1-3S超快响应 支持同行分发<br>
-极致稳定：多线智能路由 + 冗余备份系统，确保服务全年无休、高可用运行；<br>
-模型真实性：不做任何内容干预与二次过滤，让您体验到最纯粹、最强大的原生模型能力。<br>
-充值1：1 企业级服务可开票，安品Ai不只是中转站，更是您连接前沿智能世界的安全、可靠、高效桥梁
-</td>
-</tr>
-
-<tr>
 <td width="180"><a href="https://www.proxy4free.com/?keyword=4yjqecpc"><img src="assets/partners/logos/proxy4free.png" alt="proxy4free" width="150"></a></td>
 <td>感谢 Proxy4Free 赞助本项目！Proxy4Free 是面向开发者和 AI 应用的数据代理服务商，提供住宅代理、静态住宅代理、ISP 代理及数据中心代理等多种代理解决方案，适用于 Web Scraping、Browser Automation、AI Agent 等场景。支持全球 IP 资源、稳定连接与灵活切换，帮助开发者提升数据采集成功率，降低 IP 封禁风险。通过<a href="https://www.proxy4free.com/?keyword=4yjqecpc">此链接注册</a>即可开始体验，轻松构建更稳定、高效的自动化工作流。
 </td>
@@ -132,18 +122,6 @@
 <tr>
 <td width="180"><a href="http://aimzoon.com"><img src="assets/partners/logos/aimzoon.jpg" alt="aimzoon" width="150"></a></td>
 <td>感谢 Aimzoon 对本项目的赞助！ <a href="http://aimzoon.com">Aimzoon</a> 提供稳定、高性价比的 AI API 接入服务，支持开发者将常用 AI 服务快速接入 Codex、Claude Code、Gemini CLI 等编程工具。无需复杂配置，更快接入，更稳调用，更省成本。codex倍率优惠，特价倍率等促销不断，注册即送免费体验额度，让 AI 编程真正进入日常工作流。<a href="http://aimzoon.com">点击这里</a>注册体验！
-</td>
-</tr>
-
-<tr>
-<td width="180"><a href="https://console.claudeapi.com/agent/register/drTKjyn6wGLK061Z"><img src="assets/partners/logos/claudeapi.jpg" alt="claudeapi" width="150"></a></td>
-<td>感谢 Claude API 对本项目的赞助！ <a href="https://console.claudeapi.com/agent/register/drTKjyn6wGLK061Z">Claude API</a> 是专注 Claude 模型的官方渠道 API 服务商，基于 Anthropic 官方 Key 与 AWS Bedrock 官方渠道，提供稳定的 Claude Code 与 Agent 应用接入体验，支持 Claude 全系列模型，保留 Tool Use、长上下文等官方能力。服务非逆向、非降智，适合 Claude Code 深度用户、Agent 工程师与企业技术团队使用。通过<a href="https://console.claudeapi.com/agent/register/drTKjyn6wGLK061Z">[专属链接]</a>注册后联系客服，可领取免费测试额度，并支持开票和团队对接。
-</td>
-</tr>
-
-<tr>
-<td width="180"><a href="https://code0.ai/agent/register/LgpIgl9JHtVG53V1?utm_source=zcf&utm_medium=partner&utm_campaign=zcf_2026&utm_content=default"><img src="assets/partners/logos/code0.jpg" alt="code0" width="150"></a></td>
-<td>感谢 code0.ai 对本项目的赞助！ <a href="https://code0.ai/agent/register/LgpIgl9JHtVG53V1?utm_source=zcf&utm_medium=partner&utm_campaign=zcf_2026&utm_content=default">code0.ai</a> 是面向开发者与技术团队的 AI 编程工作台，聚合 Claude Code、Codex 等主流 Agent 编程能力，支持代码生成、项目理解、调试修复、代码审查与文档生成等常见研发场景。适合独立开发者、Agent 工程师、开源项目维护者和企业研发团队使用，支持开票和团队对接。通过<a href="https://code0.ai/agent/register/LgpIgl9JHtVG53V1?utm_source=zcf&utm_medium=partner&utm_campaign=zcf_2026&utm_content=default">[专属链接]</a>注册后联系客服，可领取免费测试额度，体验更高效的 AI 编程工作流。
 </td>
 </tr>
 
@@ -170,6 +148,36 @@
 <tr>
 <td width="180"><a href="https://lanox.ai/?c=6"><img src="assets/partners/logos/lanox.jpg" alt="LanoX AI" width="150"></a></td>
 <td>感谢 LanoX AI 对本项目的赞助！<a href="https://lanox.ai/?c=6">LanoX AI</a> 为开发者、团队与企业提供稳定、高性价比的全球模型接入服务。 🎁 新用户福利 — 免费领取 百万 Token ,更有500+ 免费模型 — 低成本测试、验证、部署更轻松 🧠 全球主流模型 — GPT · Claude · Gemini · Qwen · Grok... 🎬 多模态创作 — Seedance 2.0 · GPT Image · Gemini Nano Banana 🛡️ 企业级稳定服务 — 高可用💎原生能力输出💎不降智💎不混模💎调用与计费透明💎 💰 更低调用成本 — 顶级模型低至官方价 1 折起，文档清晰、接入简单、支持开票与企业批量调用 🏢 企业优选 — 适用于 AI 产品、Agent、内容平台、研发团队批量调用</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://www.rapidproxy.io/?ref=sub2api"><img src="assets/partners/logos/rapidproxy.jpg" alt="RapidProxy" width="150"></a></td>
+<td><a href="https://www.rapidproxy.io/?ref=sub2api">RapidProxy</a> 是面向开发者的数据采集代理解决方案，提供稳定可靠的住宅代理服务。通过 9000 万+全球住宅 IP和 200+国家覆盖、智能轮换机制和精准地区定位能力，帮助爬虫、AI 数据训练、SEO 监控、电商数据分析等项目突破访问限制，提高数据采集效率。支持 Playwright、Selenium、Puppeteer 等主流自动化框架，价格低至 $0.65/GB，<a href="https://www.rapidproxy.io/?ref=sub2api">立即免费测试吧</a>。</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://hao.ai"><img src="assets/partners/logos/haoai.png" alt="hao.ai" width="150"></a></td>
+<td><a href="https://hao.ai">hao.ai</a> 是面向开发者与团队的高速、稳定大模型统一 API 网关。通过一个 API Key 和统一接口，即可接入 GPT、Claude、xAI Grok 等主流模型，兼容 OpenAI、Anthropic 等常用协议与 SDK。平台提供模型路由、故障回退、团队管理及完整调用日志，模型价格低至官方参考价的 1.5 折，帮助用户更简单、更稳定、更低成本地构建 AI 应用。</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://www.swiftproxy.net/?ref=sub2api"><img src="assets/partners/logos/swiftprox.png" alt="Swiftproxy" width="150"></a></td>
+<td>Swiftproxy 是面向开发者的高性能代理解决方案，提供稳定可靠的住宅代理和静态住宅代理服务。拥有 9000 万+ 纯净住宅 IP，覆盖全球，支持灵活轮换和精准地理定位，帮助网页抓取、AI 自动化、浏览器自动化、SEO 监控和多账号管理等项目突破访问限制，提升工作流效率。支持 HTTP(S) 和 SOCKS5 协议，兼容 Playwright、Selenium、Puppeteer 等主流自动化工具，动态代理流量用完为止永不过期，支持免费测试 — <a href="https://www.swiftproxy.net/?ref=sub2api">立即开始免费测试</a>！</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://www.duckip.cn/?keyword=cu7oog6y"><img src="assets/partners/logos/duckip.png" alt="DuckIP" width="150"></a></td>
+<td><a href="https://www.duckip.cn/?keyword=cu7oog6y">DuckIP</a> - 9000 万+ 全球住宅网络资源，覆盖 195+ 国家和地区，支持轮换和粘性会话，适用于公共数据采集、RAG 更新、模型评估和多区域数据工作负载。🟢住宅代理 - 8 折优惠；🟢静态住宅代理 - ¥50.00/IP 起；🟢无限住宅代理 - ¥19.8/小时 起。✅免费领取 500M 试用流量。</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://go.apimart.ai/gh-sub2api"><img src="assets/partners/logos/apimart.jpg" alt="APIMart" width="150"></a></td>
+<td>感谢 APIMart 赞助了本项目！<a href="https://go.apimart.ai/gh-sub2api">APIMart</a> 是专注于 AI 图片/视频生成的低价 API 平台，GPT-Image-2 低至 $0.006/张，1 美元可生成 160+ 张图片。图片、视频一套异步 API 通吃：提交任务获取 ID，通过轮询或回调获取结果；批量生成上万张图片也不会超时，切换模型无需修改代码。按量付费、无月费，通过<a href="https://go.apimart.ai/gh-sub2api">此注册链接</a>注册即可开始使用。</td>
+</tr>
+
+<tr>
+<td width="180"><a href="https://www.axisnow.io/"><img src="assets/partners/logos/axisnow.jpg" alt="AxisNow" width="150"></a></td>
+<td>感谢 AxisNow 赞助了本项目！<a href="https://www.axisnow.io/">AxisNow</a> 保护并加速网站与 API，兼顾中国大陆及全球的访问体验，并通过客户端 SDK，将加速与安全能力延伸至原生/移动 App — <strong>自建私有部署 CDN</strong>｜<strong>订阅式高防 CDN</strong>｜<strong>自主可控、灵活组合的 CDN 网络</strong>。</td>
 </tr>
 
 </table>
@@ -203,7 +211,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 
 | 组件 | 技术 |
 |------|------|
-| 后端 | Go 1.25.7, Gin, Ent |
+| 后端 | Go 1.27.0, Gin, Ent |
 | 前端 | Vue 3.4+, Vite 5+, TailwindCSS |
 | 数据库 | PostgreSQL 15+ |
 | 缓存/队列 | Redis 7+ |
@@ -558,33 +566,6 @@ default:
   rate_multiplier: 1.0
 ```
 
-### Sora 功能状态（暂不可用）
-
-> ⚠️ 当前 Sora 相关功能因上游接入与媒体链路存在技术问题，暂时不可用。
-> 现阶段请勿在生产环境依赖 Sora 能力。
-> 文档中的 `gateway.sora_*` 配置仅作预留，待技术问题修复后再恢复可用。
-
-### Sora 媒体签名 URL（功能恢复后可选）
-
-当配置 `gateway.sora_media_signing_key` 且 `gateway.sora_media_signed_url_ttl_seconds > 0` 时，网关会将 Sora 输出的媒体地址改写为临时签名 URL（`/sora/media-signed/...`）。这样无需 API Key 即可在浏览器中直接访问，且具备过期控制与防篡改能力（签名包含 path + query）。
-
-```yaml
-gateway:
-  # /sora/media 是否强制要求 API Key（默认 false）
-  sora_media_require_api_key: false
-  # 媒体临时签名密钥（为空则禁用签名）
-  sora_media_signing_key: "your-signing-key"
-  # 临时签名 URL 有效期（秒）
-  sora_media_signed_url_ttl_seconds: 900
-```
-
-> 若未配置签名密钥，`/sora/media-signed` 将返回 503。  
-> 如需更严格的访问控制，可将 `sora_media_require_api_key` 设为 true，仅允许携带 API Key 的 `/sora/media` 访问。
-
-访问策略说明：
-- `/sora/media`：内部调用或客户端携带 API Key 才能下载
-- `/sora/media-signed`：外部可访问，但有签名 + 过期控制
-
 `config.yaml` 还支持以下安全相关配置：
 
 - `cors.allowed_origins` 配置 CORS 白名单
@@ -792,11 +773,11 @@ sub2api/
 
 ## Star History
 
-<a href="https://star-history.com/#Wei-Shaw/sub2api&Date">
+<a href="https://star-history.dera.page/#Wei-Shaw/sub2api&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Wei-Shaw/sub2api&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=Wei-Shaw/sub2api&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=Wei-Shaw/sub2api&type=Date" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=Wei-Shaw/sub2api&type=Date" />
  </picture>
 </a>
 

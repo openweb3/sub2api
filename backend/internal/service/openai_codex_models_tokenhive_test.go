@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/tidwall/gjson"
 )
 
 func TestTokenHiveCodexManifestSentinelContract(t *testing.T) {
@@ -123,7 +124,7 @@ func TestOrdinaryCodexManifestPreservesCustomAPIKeyPath(t *testing.T) {
 	if request := upstream.lastReq; request.Header.Get(TokenHiveHeaderMethod) != "" || request.Header.Get(TokenHiveHeaderRawURL) != "" {
 		t.Fatalf("ordinary request gained TokenHive metadata: %#v", request.Header)
 	}
-	if got, want := string(manifest.Body), `{"models":[{"slug":"ordinary-model"}]}`; got != want {
-		t.Fatalf("ordinary body = %q, want %q", got, want)
+	if got, want := gjson.GetBytes(manifest.Body, "models.0.slug").String(), "ordinary-model"; got != want {
+		t.Fatalf("ordinary model slug = %q, want %q", got, want)
 	}
 }

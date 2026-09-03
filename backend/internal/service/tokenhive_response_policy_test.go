@@ -114,7 +114,7 @@ func TestTokenHiveResponsePolicySuppressesTransportAndUpstreamSideEffects(t *tes
 	}
 	_ = svc.handleOpenAIUpstreamTransportErrorWithPolicy(context.Background(), c, account,
 		errors.New("unexpected EOF while reading response stream"), false, policy)
-	svc.ReportOpenAIAccountScheduleResultWithPolicy(policy, account.ID, "gpt-5.4", false, nil)
+	svc.ReportOpenAIAccountScheduleResultWithPolicy(policy, account, "gpt-5.4", false, nil)
 	svc.RecordOpenAIAccountSwitchWithPolicy(policy)
 
 	require.Zero(t, repo.tempUnschedulable)
@@ -356,7 +356,7 @@ func TestOrdinaryAccountResponsePolicyPreservesSideEffects(t *testing.T) {
 	}
 	_ = svc.handleOpenAIUpstreamTransportErrorWithPolicy(context.Background(), c, account,
 		errors.New("unexpected EOF while reading response stream"), false, policy)
-	svc.ReportOpenAIAccountScheduleResultWithPolicy(policy, account.ID, "gpt-5.4", false, nil)
+	svc.ReportOpenAIAccountScheduleResultWithPolicy(policy, account, "gpt-5.4", false, nil)
 	svc.RecordOpenAIAccountSwitchWithPolicy(policy)
 
 	require.Equal(t, 1, repo.tempUnschedulable)

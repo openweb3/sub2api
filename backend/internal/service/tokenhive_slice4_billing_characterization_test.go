@@ -202,9 +202,10 @@ func tokenHiveSlice4BillingGoldenCases(t *testing.T) []tokenHiveSlice4BillingGol
 	intervalInputs := []map[string]any{{"min_tokens": 100, "max_tokens": 200, "input_price": "0.002"}}
 	intervalRuntime := tokenHiveSlice4RuntimePrice(t, "0.002")
 	intervalResolved := &ResolvedPricing{
-		Mode:        BillingModeToken,
-		BasePricing: &ModelPricing{InputPricePerToken: tokenHiveSlice4RuntimePrice(t, "0.001")},
-		Intervals:   []PricingInterval{{MinTokens: 100, MaxTokens: tokenHiveSlice4Int(200), InputPrice: &intervalRuntime}},
+		Mode:                      BillingModeToken,
+		BasePricing:               &ModelPricing{InputPricePerToken: tokenHiveSlice4RuntimePrice(t, "0.001")},
+		Intervals:                 []PricingInterval{{MinTokens: 100, MaxTokens: tokenHiveSlice4Int(200), InputPrice: &intervalRuntime}},
+		longContextPricingEnabled: true,
 	}
 	lowerCost := tokenHiveSlice4CalculateTokenCost(t, "fixture-interval", UsageTokens{InputTokens: 100}, intervalResolved)
 	upperCost := tokenHiveSlice4CalculateTokenCost(t, "fixture-interval", UsageTokens{InputTokens: 200}, intervalResolved)

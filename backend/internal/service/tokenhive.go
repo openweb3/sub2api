@@ -430,7 +430,7 @@ func (s *GatewayService) forwardTokenHiveAnthropicMessages(
 			if errors.As(streamErr, &sseErr) {
 				writeTokenHiveAnthropicSSEError(c, sseErr.RawData)
 			}
-			return partialStreamUsageResult(resp, streamResult, handoff.originalModel, handoff.upstreamModel, startTime, streamErr), true, streamErr
+			return partialStreamUsageResult(c, resp, streamResult, handoff.originalModel, handoff.upstreamModel, startTime, streamErr), true, streamErr
 		}
 		return &ForwardResult{RequestID: resp.Header.Get("x-request-id"), Usage: *streamResult.usage, Model: handoff.originalModel, UpstreamModel: handoff.upstreamModel, Stream: true, Duration: time.Since(startTime), FirstTokenMs: streamResult.firstTokenMs, ClientDisconnect: streamResult.clientDisconnect}, true, nil
 	}

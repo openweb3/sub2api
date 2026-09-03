@@ -79,6 +79,14 @@ type tokenHiveSlice4AccountRepo struct {
 	accounts []service.Account
 }
 
+func (r *tokenHiveSlice4AccountRepo) ListSchedulableByGroupID(context.Context, int64) ([]service.Account, error) {
+	return append([]service.Account(nil), r.accounts...), nil
+}
+
+func (r *tokenHiveSlice4AccountRepo) ListModelAvailabilityCandidates(context.Context, *int64, []string, bool) ([]service.Account, error) {
+	return append([]service.Account(nil), r.accounts...), nil
+}
+
 func (r *tokenHiveSlice4AccountRepo) ListSchedulableByGroupIDAndPlatform(context.Context, int64, string) ([]service.Account, error) {
 	return append([]service.Account(nil), r.accounts...), nil
 }
