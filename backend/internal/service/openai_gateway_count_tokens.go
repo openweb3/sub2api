@@ -318,9 +318,17 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 		writeAnthropicCountTokensError(c, http.StatusInternalServerError, "api_error", "Failed to build request")
 		return fmt.Errorf("build input_tokens request: %w", err)
 	}
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), prepared.UpstreamModel, false, SourceOperationOpenAIResponsesInputTokens, upstreamReq); err != nil {
+		return fmt.Errorf("build tokenhive input_tokens handoff: %w", err)
+	}
+	policy := s.ResolveTokenHiveResponsePolicy(account)
 
 	proxyURL := ""
-	if account.Proxy != nil {
+	if tokenHiveAccount == nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
@@ -339,13 +347,16 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	}
 
 	if resp.StatusCode >= 400 {
+		if handled, executionErr := s.handleTrustedTokenHiveExecutionErrorResponse(resp, c, account, respBody, policy); handled {
+			return executionErr
+		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if account.Type == AccountTypeOAuth && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
+		if (account.Type == AccountTypeOAuth || tokenHiveAccount != nil) && isOpenAIOAuthInputTokensUnsupported(resp.StatusCode, respBody) {
 			writeOpenAIOAuthInputTokensFallback(c, account, prepared, resp.StatusCode)
 			return nil
 		}
 
-		if s.rateLimitService != nil {
+		if s.rateLimitService != nil && policy.AllowAccountMutation {
 			s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 		}
 

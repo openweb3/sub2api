@@ -76,7 +76,7 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 
 		// The client ETag represents the final group-specific body, so fetch the
 		// source manifest before applying local filtering and alias metadata.
-		manifest, err := h.gatewayService.FetchCodexModelsManifest(c.Request.Context(), account, c.Query("client_version"), "")
+		manifest, err := h.gatewayService.FetchCodexModelsManifestForClient(c.Request.Context(), account, c.Query("client_version"), "", apiKey.ID)
 		if err != nil {
 			if c.Request.Context().Err() != nil {
 				return

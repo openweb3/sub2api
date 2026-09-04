@@ -261,11 +261,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 	sessionHash := h.gatewayService.GenerateSessionHash(parsedReq)
 
-	// [DEBUG-STICKY] 打印会话 hash 生成结果
-	reqLog.Info("sticky.session_hash_generated",
-		zap.String("session_hash", sessionHash),
-		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
-	)
+	logStickySessionHashGenerated(reqLog, sessionHash, parsedReq.MetadataUserID)
 
 	// 获取平台：优先使用强制平台（/antigravity 路由），其次使用 composite 解析出的目标平台，否则使用分组平台
 	platform := ""
@@ -287,7 +283,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		sessionBoundAccountID, _ = h.gatewayService.GetCachedSessionAccountID(c.Request.Context(), apiKey.GroupID, sessionKey)
 		// [DEBUG-STICKY] 打印粘性会话查询结果
 		reqLog.Info("sticky.cache_lookup",
-			zap.String("session_key", sessionKey),
+			zap.Bool("session_key_present", true),
 			zap.Int64("bound_account_id", sessionBoundAccountID),
 		)
 		if sessionBoundAccountID > 0 {
@@ -299,7 +295,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			c.Request = c.Request.WithContext(ctx)
 		}
 	} else {
-		reqLog.Info("sticky.no_session_key", zap.String("session_hash", sessionHash))
+		reqLog.Info("sticky.no_session_key", zap.Bool("session_hash_present", strings.TrimSpace(sessionHash) != ""))
 	}
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
 	hasBoundSession := sessionKey != "" && sessionBoundAccountID > 0
@@ -623,7 +619,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 
 			// 选择支持该模型的账号
 			reqLog.Info("sticky.selecting_account",
-				zap.String("session_key", sessionKey),
+				zap.Bool("session_key_present", strings.TrimSpace(sessionKey) != ""),
 				zap.Int64("sticky_bound_account_id", sessionBoundAccountID),
 				zap.Bool("has_bound_session", hasBoundSession),
 				zap.Int("failed_account_count", len(fs.FailedAccountIDs)),
@@ -843,6 +839,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				return
 			}
 			attemptBody := attemptParsedReq.Body.Bytes()
+			responsePolicy := h.gatewayService.ResolveTokenHiveResponsePolicy(account)
 
 			// 转发请求 - 根据账号平台分流
 			c.Set("parsed_request", attemptParsedReq)
@@ -988,8 +985,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					_ = h.antigravityGatewayService.WriteMappedClaudeError(c, account, promptTooLongErr.StatusCode, promptTooLongErr.RequestID, promptTooLongErr.Body)
 					return
 				}
-				var failoverErr *service.UpstreamFailoverError
-				if errors.As(err, &failoverErr) {
+				if failoverErr, allowFailover := gatewayFailoverForPolicy(err, responsePolicy); allowFailover {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
@@ -1043,7 +1039,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// RPM 计数递增（Forward 成功后）
 			// 注意：TOCTOU 竞态是已知且可接受的设计权衡，与 WindowCost 一致的 soft-limit 模式。
 			// 在高并发下可能短暂超出 RPM 限制，但不会导致请求失败。
-			if account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
+			if responsePolicy.AllowAccountMutation && account.IsAnthropicOAuthOrSetupToken() && account.GetBaseRPM() > 0 {
 				if err := h.gatewayService.IncrementAccountRPM(c.Request.Context(), account.ID); err != nil {
 					reqLog.Warn("gateway.rpm_increment_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -1054,7 +1050,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// - 选中账号与粘性账号一致：刷新 TTL
 			// - 粘性账号因负载/RPM 被跳过、选中了其他账号：不覆盖原绑定，
 			//   下次请求粘性账号恢复后仍可命中
-			if sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
+			if responsePolicy.AllowSchedulerFeedback && sessionKey != "" && (sessionBoundAccountID == 0 || sessionBoundAccountID == account.ID) {
 				if err := h.gatewayService.BindStickySession(c.Request.Context(), currentAPIKey.GroupID, sessionKey, account.ID); err != nil {
 					reqLog.Warn("gateway.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 				}
@@ -1067,6 +1063,16 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			return
 		}
 	}
+}
+
+func logStickySessionHashGenerated(log *zap.Logger, sessionHash, metadataUserID string) {
+	if log == nil {
+		return
+	}
+	log.Info("sticky.session_hash_generated",
+		zap.Bool("session_hash_present", strings.TrimSpace(sessionHash) != ""),
+		zap.Bool("metadata_user_id_present", strings.TrimSpace(metadataUserID) != ""),
+	)
 }
 
 // Models handles listing available models
@@ -1997,6 +2003,17 @@ func gatewayForwardErrorAlreadyCommunicated(c *gin.Context, writerSizeBeforeForw
 		return false
 	}
 	return !strings.Contains(contentType, "text/event-stream")
+}
+
+func gatewayFailoverForPolicy(err error, policy service.TokenHiveResponsePolicy) (*service.UpstreamFailoverError, bool) {
+	if err == nil || !policy.AllowAccountFailover {
+		return nil, false
+	}
+	var failoverErr *service.UpstreamFailoverError
+	if !errors.As(err, &failoverErr) {
+		return nil, false
+	}
+	return failoverErr, true
 }
 
 // checkClaudeCodeVersion 检查 Claude Code 客户端版本是否满足版本要求

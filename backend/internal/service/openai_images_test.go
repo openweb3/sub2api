@@ -1392,6 +1392,59 @@ func TestOpenAIGatewayServiceForwardImages_APIKeyGenerationUsesConfiguredV1BaseU
 	require.Equal(t, "aGVsbG8=", gjson.Get(rec.Body.String(), "data.0.b64_json").String())
 }
 
+func TestOpenAIGatewayServiceForwardImages_APIKeyZeroImageResponseHonorsTokenHiveBoundary(t *testing.T) {
+	for _, dedicated := range []bool{false, true} {
+		name := "ordinary"
+		if dedicated {
+			name = "dedicated"
+		}
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			body := []byte(`{"model":"gpt-image-2","prompt":"draw a cat","n":3,"response_format":"b64_json"}`)
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = req
+			c.Set("api_key", &APIKey{ID: 707})
+
+			account := &Account{ID: 60, Name: "openai-apikey", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "test-api-key", "base_url": "https://image-upstream.example/v1"}}
+			cfg := &config.Config{}
+			var registry *TokenHiveRegistry
+			if dedicated {
+				cfg.TokenHive = tokenHiveConfigForTest(account.ID)
+				var err error
+				registry, err = NewTokenHiveRegistry(cfg.TokenHive, []Account{*account})
+				require.NoError(t, err)
+			}
+			svc := &OpenAIGatewayService{
+				cfg: cfg, tokenHiveRegistry: registry,
+				httpUpstream: &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"created":1710000020,"data":[]}`)),
+				}},
+			}
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+
+			result, err := svc.ForwardImages(context.Background(), c, account, body, parsed, "")
+			if dedicated {
+				require.ErrorContains(t, err, "upstream did not return image output")
+				require.Nil(t, result)
+				require.Zero(t, rec.Body.Len(), "dedicated zero-image body must not be committed")
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, 3, result.ImageCount, "ordinary APIKey keeps parsed n billing semantics")
+			require.Equal(t, http.StatusOK, rec.Code)
+			require.JSONEq(t, `{"created":1710000020,"data":[]}`, rec.Body.String())
+		})
+	}
+}
+
 func TestOpenAIGatewayServiceForwardImages_APIKeyAccessStateUsesTypedFailover(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"gpt-image-1","prompt":"draw a cat"}`)

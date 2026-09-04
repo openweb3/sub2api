@@ -3670,6 +3670,17 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 
 	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
 	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+
+	tokenHiveCfg := tokenHiveConfigForTest(account.ID)
+	registry, err := NewTokenHiveRegistry(tokenHiveCfg, []Account{*account})
+	require.NoError(t, err)
+	scheduler.service.cfg.TokenHive = tokenHiveCfg
+	scheduler.service.tokenHiveRegistry = registry
+	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeHTTPBridge
+	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress),
+		"TokenHive handoff only supports HTTP and must not be selected for Responses WebSocket ingress")
+	require.True(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportHTTPSSE),
+		"TokenHive accounts must remain eligible for ordinary HTTP SSE scheduling")
 }
 
 func int64PtrForTest(v int64) *int64 {

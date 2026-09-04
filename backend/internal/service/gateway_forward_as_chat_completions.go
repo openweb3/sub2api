@@ -111,18 +111,27 @@ func (s *GatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("get access token: %w", err)
 	}
 
-	// 9. Get proxy URL
-	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
-		proxyURL = account.Proxy.URL()
-	}
-
 	// 10. Build upstream request
 	upstreamCtx, releaseUpstreamCtx := detachStreamUpstreamContext(ctx, reqStream)
 	upstreamReq, _, err := s.buildUpstreamRequest(upstreamCtx, c, account, anthropicBody, token, tokenType, mappedModel, reqStream, shouldMimicClaudeCode)
 	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
+	}
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	responsePolicy := s.ResolveTokenHiveResponsePolicy(account)
+	if tokenHiveAccount != nil {
+		stripTokenHiveProviderCredentials(upstreamReq.Header)
+	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), mappedModel, reqStream, SourceOperationAnthropicMessagesStream, upstreamReq); err != nil {
+		return nil, fmt.Errorf("build tokenhive chat compatibility handoff: %w", err)
+	}
+	proxyURL := ""
+	if tokenHiveAccount == nil && account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
 	}
 
 	// 11. Send request
@@ -145,8 +154,11 @@ func (s *GatewayService) ForwardAsChatCompletions(
 
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+		if handled, executionErr := handleTokenHiveExecutionErrorResponse(resp, c, account, respBody, responsePolicy, false); handled {
+			return nil, executionErr
+		}
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		if responsePolicy.AllowAccountFailover && s.shouldFailoverUpstreamError(resp.StatusCode) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				Platform:           account.Platform,
 				AccountID:          account.ID,
@@ -157,7 +169,7 @@ func (s *GatewayService) ForwardAsChatCompletions(
 				Message:            upstreamMsg,
 			})
 			shouldDisable := false
-			if s.rateLimitService != nil {
+			if responsePolicy.AllowAccountMutation && s.rateLimitService != nil {
 				shouldDisable = s.rateLimitService.HandleUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, mappedModel)
 			}
 			return nil, &UpstreamFailoverError{

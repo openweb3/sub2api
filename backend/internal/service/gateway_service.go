@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -258,14 +259,11 @@ func parseDebugEnvBool(raw string) bool {
 	}
 }
 
-func shortSessionHash(sessionHash string) string {
+func sessionPresenceForLog(sessionHash string) string {
 	if sessionHash == "" {
 		return ""
 	}
-	if len(sessionHash) <= 8 {
-		return sessionHash
-	}
-	return sessionHash[:8]
+	return "[present]"
 }
 
 func redactAuthHeaderValue(v string) string {
@@ -283,40 +281,37 @@ func redactAuthHeaderValue(v string) string {
 func safeHeaderValueForLog(key string, v string) string {
 	key = strings.ToLower(strings.TrimSpace(key))
 	switch key {
-	case "authorization", "x-api-key":
+	case "authorization", "proxy-authorization", "x-api-key", "api-key", "cookie", "set-cookie":
 		return redactAuthHeaderValue(v)
-	default:
+	case "accept",
+		"anthropic-beta",
+		"anthropic-dangerous-direct-browser-access",
+		"anthropic-version",
+		"content-type",
+		"user-agent",
+		"x-app",
+		"x-stainless-arch",
+		"x-stainless-helper-method",
+		"x-stainless-lang",
+		"x-stainless-os",
+		"x-stainless-package-version",
+		"x-stainless-retry-count",
+		"x-stainless-runtime",
+		"x-stainless-runtime-version",
+		"x-stainless-timeout":
 		return strings.TrimSpace(v)
+	default:
+		return sessionPresenceForLog(strings.TrimSpace(v))
 	}
 }
 
-func extractSystemPreviewFromBody(body []byte) string {
-	if len(body) == 0 {
-		return ""
+func safeURLForLog(value string) string {
+	value = strings.TrimSpace(value)
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return sessionPresenceForLog(value)
 	}
-	sys := gjson.GetBytes(body, "system")
-	if !sys.Exists() {
-		return ""
-	}
-
-	switch {
-	case sys.IsArray():
-		for _, item := range sys.Array() {
-			if !item.IsObject() {
-				continue
-			}
-			if strings.EqualFold(item.Get("type").String(), "text") {
-				if t := item.Get("text").String(); strings.TrimSpace(t) != "" {
-					return t
-				}
-			}
-		}
-		return ""
-	case sys.Type == gjson.String:
-		return sys.String()
-	default:
-		return ""
-	}
+	return fmt.Sprintf("%s://%s [path_present=%t]", parsed.Scheme, parsed.Host, strings.TrimSpace(parsed.Path) != "")
 }
 
 func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account, tokenType string, mimicClaudeCode bool) string {
@@ -324,7 +319,7 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 		return ""
 	}
 
-	// Only log a minimal fingerprint to avoid leaking user content.
+	// Only log a minimal structural summary to avoid leaking user content.
 	interesting := []string{
 		"user-agent",
 		"x-app",
@@ -354,14 +349,12 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 	}
 
 	metaUserID := strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String())
-	sysPreview := strings.TrimSpace(extractSystemPreviewFromBody(body))
-
-	// Truncate preview to keep logs sane.
-	if len(sysPreview) > 300 {
-		sysPreview = sysPreview[:300] + "..."
+	system := gjson.GetBytes(body, "system")
+	systemPresent := system.Exists() && system.Type != gjson.Null
+	systemBytes := 0
+	if systemPresent {
+		systemBytes = len(system.Raw)
 	}
-	sysPreview = strings.ReplaceAll(sysPreview, "\n", "\\n")
-	sysPreview = strings.ReplaceAll(sysPreview, "\r", "\\r")
 
 	aid := int64(0)
 	aname := ""
@@ -371,14 +364,16 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 	}
 
 	return fmt.Sprintf(
-		"url=%s account=%d(%s) tokenType=%s mimic=%t meta.user_id=%q system.preview=%q headers={%s}",
-		req.URL.String(),
+		"url=%s account=%d(%s) tokenType=%s mimic=%t meta.user_id.present=%t meta.user_id.bytes=%d system.present=%t system.bytes=%d headers={%s}",
+		safeURLForLog(req.URL.String()),
 		aid,
 		aname,
 		tokenType,
 		mimicClaudeCode,
-		metaUserID,
-		sysPreview,
+		metaUserID != "",
+		len(metaUserID),
+		systemPresent,
+		systemBytes,
 		strings.Join(h, " "),
 	)
 }
@@ -758,6 +753,7 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
+	tokenHiveRegistry     *TokenHiveRegistry
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
 	usageLogRepo          UsageLogRepository
@@ -791,7 +787,7 @@ type GatewayService struct {
 	channelService        *ChannelService
 	resolver              *ModelPricingResolver
 	compositeResolver     *CompositeRouteResolver
-	debugGatewayBodyFile  atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
+	debugGatewayBodyFile  atomic.Pointer[os.File] // receives redacted request summaries when SUB2API_DEBUG_GATEWAY_BODY is set
 	tlsFPProfileService   *TLSFingerprintProfileService
 	balanceNotifyService  *BalanceNotifyService
 	userPlatformQuotaRepo UserPlatformQuotaRepository
@@ -895,14 +891,14 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		if uid != nil && uid.SessionID != "" {
 			slog.Info("sticky.hash_source",
 				"source", "metadata_user_id",
-				"session_id", uid.SessionID,
-				"device_id", uid.DeviceID,
+				"session_hash_present", true,
+				"metadata_user_id_present", true,
 				"is_new_format", uid.IsNewFormat,
 			)
 			return uid.SessionID
 		}
 		slog.Info("sticky.hash_metadata_parse_failed",
-			"metadata_user_id", parsed.MetadataUserID,
+			"metadata_user_id_present", true,
 			"parsed_nil", uid == nil,
 		)
 	}
@@ -913,7 +909,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		hash := s.hashContent(cacheableContent)
 		slog.Info("sticky.hash_source",
 			"source", "cacheable_content",
-			"hash", hash,
+			"session_hash_present", true,
 		)
 		return hash
 	}
@@ -941,7 +937,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		hash := s.hashContent(combined.String())
 		slog.Info("sticky.hash_source",
 			"source", "message_content_fallback",
-			"hash", hash,
+			"session_hash_present", true,
 			"content_len", combined.Len(),
 		)
 		return hash
@@ -958,12 +954,26 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
 }
 
+func (s *GatewayService) refreshGatewayStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil || !s.allowAnthropicSchedulerFeedback(accountID) {
+		return nil
+	}
+	return s.cache.RefreshSessionTTL(ctx, derefGroupID(groupID), sessionHash, stickySessionTTL)
+}
+
+func (s *GatewayService) deleteGatewayStickySession(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil || !s.allowAnthropicSchedulerFeedback(accountID) {
+		return nil
+	}
+	return s.cache.DeleteSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+}
+
 // bindGatewayStickySessionDuringSelection preserves the normal eager sticky
 // behavior unless a profit gate is installed. Profit-controlled requests bind
 // only after the terminal post-slot check, otherwise a rejected candidate could
 // overwrite a healthy pre-existing sticky binding.
 func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if gatewayProfitControlGateActive(ctx) {
+	if gatewayProfitControlGateActive(ctx) || !s.allowAnthropicSchedulerFeedback(accountID) {
 		return nil
 	}
 	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
@@ -976,7 +986,7 @@ func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Con
 // account remains bound and automatically becomes eligible again if its
 // account rate recovers.
 func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
-	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil || !s.allowAnthropicSchedulerFeedback(accountID) {
 		return nil
 	}
 	if !gatewayProfitControlGateActive(ctx) {
@@ -1610,23 +1620,40 @@ func (s *GatewayService) initDebugGatewayBodyFile(path string) {
 
 	// 确保父目录存在
 	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0755); err != nil { //nolint:gosec // G703: 同上
-			slog.Error("failed to create gateway debug log directory", "dir", dir, "error", err)
+		if err := os.MkdirAll(dir, 0755); err != nil { //nolint:gosec // G703: path 仅来自启动环境变量
+			slog.Error("failed to create gateway debug log directory", "dir_present", true, "error_type", fmt.Sprintf("%T", err))
 			return
 		}
 	}
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) //nolint:gosec // G703: 同上
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) //nolint:gosec // G703: path comes only from the operator-controlled SUB2API_DEBUG_GATEWAY_BODY startup environment variable
 	if err != nil {
-		slog.Error("failed to open gateway debug log file", "path", path, "error", err)
+		slog.Error("failed to open gateway debug log file", "path_present", true, "error_type", fmt.Sprintf("%T", err))
+		return
+	}
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		slog.Error("failed to secure gateway debug log file", "path_present", true, "error_type", fmt.Sprintf("%T", err))
 		return
 	}
 	s.debugGatewayBodyFile.Store(f)
-	slog.Info("gateway debug logging enabled", "path", path)
+	slog.Info("gateway debug logging enabled", "path_present", true)
 }
 
-// debugLogGatewaySnapshot 将网关请求的完整快照（headers + body）写入独立的调试日志文件，
-// 用于对比客户端原始请求和上游转发请求。
+func safeGatewaySnapshotExtraValue(key, value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case "account_type", "stream", "token_type", "mimic_claude_code", "fingerprint_applied", "enable_fp", "enable_mpt":
+		return value
+	case "url":
+		return safeURLForLog(value)
+	default:
+		return sessionPresenceForLog(value)
+	}
+}
+
+// debugLogGatewaySnapshot 将网关请求的脱敏结构摘要写入独立调试日志文件，
+// 用于对比客户端与上游请求结构，不记录非白名单 header 值或请求正文。
 //
 // 启用方式（环境变量）：
 //
@@ -1653,11 +1680,11 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 		}
 		sort.Strings(extraKeys)
 		for _, k := range extraKeys {
-			fmt.Fprintf(&buf, "  %s: %s\n", k, extra[k])
+			fmt.Fprintf(&buf, "  %s: %s\n", k, safeGatewaySnapshotExtraValue(k, extra[k]))
 		}
 	}
 
-	// 2. headers（按真实 Claude CLI wire 顺序排列，便于与抓包对比；auth 脱敏）
+	// 2. headers（按真实 Claude CLI wire 顺序排列；非白名单值仅记录存在性）
 	fmt.Fprint(&buf, "--- headers ---\n")
 	for _, k := range sortHeadersByWireOrder(headers) {
 		for _, v := range headers[k] {
@@ -1665,18 +1692,16 @@ func (s *GatewayService) debugLogGatewaySnapshot(tag string, headers http.Header
 		}
 	}
 
-	// 3. body（完整输出，格式化 JSON 便于 diff）
-	fmt.Fprint(&buf, "--- body ---\n")
+	// 3. body summary（不记录请求内容）
+	fmt.Fprint(&buf, "--- body summary ---\n")
 	if len(body) == 0 {
 		fmt.Fprint(&buf, "  (empty)\n")
 	} else {
-		var pretty bytes.Buffer
-		if json.Indent(&pretty, body, "  ", "  ") == nil {
-			fmt.Fprintf(&buf, "  %s\n", pretty.Bytes())
-		} else {
-			// JSON 格式化失败时原样输出
-			fmt.Fprintf(&buf, "  %s\n", body)
-		}
+		fmt.Fprintf(&buf, "  bytes: %d\n", len(body))
+		fmt.Fprintf(&buf, "  valid_json: %t\n", gjson.ValidBytes(body))
+		fmt.Fprintf(&buf, "  metadata_user_id_present: %t\n", strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String()) != "")
+		fmt.Fprintf(&buf, "  system_present: %t\n", gjson.GetBytes(body, "system").Exists())
+		fmt.Fprintf(&buf, "  messages_present: %t\n", gjson.GetBytes(body, "messages").Exists())
 	}
 
 	// 写入文件（调试用，并发写入可能交错但不影响可读性）

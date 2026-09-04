@@ -771,7 +771,7 @@ func getSessionID(c *gin.Context) string {
 // logPrefix 生成统一的日志前缀
 func logPrefix(sessionID, accountName string) string {
 	if sessionID != "" {
-		return fmt.Sprintf("[antigravity-Forward] session=%s account=%s", sessionID, accountName)
+		return fmt.Sprintf("[antigravity-Forward] session=%s account=%s", sessionPresenceForLog(sessionID), accountName)
 	}
 	return fmt.Sprintf("[antigravity-Forward] account=%s", accountName)
 }
@@ -899,7 +899,7 @@ func (s *AntigravityGatewayService) clearStickySession(ctx context.Context, grou
 		return
 	}
 	if err := s.cache.DeleteSessionAccountID(ctx, groupID, sessionHash); err != nil {
-		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] sticky_session_clear_failed group_id=%d session=%s err=%v", groupID, shortSessionHash(sessionHash), err)
+		logger.LegacyPrintf("service.antigravity_gateway", "[antigravity-Forward] sticky_session_clear_failed group_id=%d session=%s err=%v", groupID, sessionPresenceForLog(sessionHash), err)
 	}
 }
 

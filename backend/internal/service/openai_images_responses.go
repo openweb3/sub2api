@@ -908,7 +908,25 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 	account *Account,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
+	return s.handleOpenAIImagesErrorResponseWithPolicy(ctx, resp, c, account, ordinaryTokenHiveResponsePolicy(), requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponseWithPolicy(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	policy TokenHiveResponsePolicy,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	if source, code, ok := trustedTokenHiveExecutionError(resp, body); policy.Dedicated && ok {
+		const clientMessage = "TokenHive execution failed"
+		setOpsUpstreamError(c, 0, clientMessage, "")
+		upErr := &OpenAIImagesUpstreamError{StatusCode: resp.StatusCode, ErrorType: code, Message: clientMessage}
+		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
+		return nil, fmt.Errorf("tokenhive execution error: source=%s code=%s", source, code)
+	}
 
 	upstreamMsg := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(body)))
 	upstreamDetail := ""
@@ -981,7 +999,7 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 	if len(requestedModel) > 0 {
 		modelForCooldown = strings.TrimSpace(requestedModel[0])
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, modelForCooldown)
+	shouldDisable := s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, body, policy, modelForCooldown)
 	failoverErr := s.newOpenAIAccountFailoverError(
 		account,
 		resp.StatusCode,
@@ -991,7 +1009,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 		shouldDisable,
 		false,
 	)
-	shouldFailover := shouldDisable || (account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests && failoverErr.RetryableOnSameAccount)
+	shouldFailover := (policy.AllowAccountFailover && shouldDisable) ||
+		(policy.AllowSameAccountRetry && account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests && failoverErr.RetryableOnSameAccount)
 	kind := "http_error"
 	if shouldFailover {
 		kind = "failover"

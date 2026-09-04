@@ -258,6 +258,22 @@ func TestOpenAIHandleStreamingAwareError_NonStreaming(t *testing.T) {
 	assert.Equal(t, "test error", errorObj["message"])
 }
 
+func TestOpenAIHandleStreamingAwareError_UncommittedJSONOverridesStaleSSEContentType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Header("Content-Type", "text/event-stream")
+
+	(&OpenAIGatewayHandler{}).handleStreamingAwareError(
+		c, http.StatusBadGateway, "upstream_error", "Upstream request failed", false,
+	)
+
+	require.Equal(t, http.StatusBadGateway, w.Code)
+	require.Equal(t, "application/json; charset=utf-8", w.Header().Get("Content-Type"))
+	require.JSONEq(t, `{"error":{"message":"Upstream request failed","type":"upstream_error"}}`, w.Body.String())
+}
+
 func TestReadRequestBodyWithPrealloc(t *testing.T) {
 	payload := `{"model":"gpt-5","input":"hello"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(payload))

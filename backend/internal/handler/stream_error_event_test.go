@@ -65,10 +65,13 @@ func parseResponsesFailedSSE(t *testing.T, body string) (map[string]any, map[str
 // OpenAI handler: /v1/responses streaming, after stream started, must emit response.failed.
 func TestOpenAIHandleStreamingAwareError_ResponsesStreamingEmitsResponseFailed(t *testing.T) {
 	c, w := newGinContextForEndpoint(t, EndpointResponses)
+	c.Header("Content-Type", "text/event-stream")
+	c.Writer.WriteHeader(http.StatusOK)
 	h := &OpenAIGatewayHandler{}
 	h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error",
 		"Concurrency limit exceeded for user, please retry later", true)
 
+	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
 	resp, errObj := parseResponsesFailedSSE(t, w.Body.String())
 
 	id, _ := resp["id"].(string)

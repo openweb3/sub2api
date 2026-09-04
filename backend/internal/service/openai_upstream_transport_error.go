@@ -106,6 +106,10 @@ func classifyUpstreamTransportError(err error) upstreamTransportErrorClass {
 //
 // passthrough tags the Ops error event for the OpenAI passthrough forward path.
 func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool) error {
+	return s.handleOpenAIUpstreamTransportErrorWithPolicy(ctx, c, account, err, passthrough, ordinaryTokenHiveResponsePolicy())
+}
+
+func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportErrorWithPolicy(ctx context.Context, c *gin.Context, account *Account, err error, passthrough bool, policy TokenHiveResponsePolicy) error {
 	safeErr := sanitizeUpstreamErrorMessage(err.Error())
 	setOpsUpstreamError(c, 0, safeErr, "")
 	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -125,7 +129,7 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	}
 
 	// Transport attempt reached the network path; count as Ollama Cloud activity.
-	if s != nil {
+	if s != nil && policy.AllowAccountMutation {
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
 	}
 
@@ -136,7 +140,7 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	}
 
 	if classifyUpstreamTransportError(err).Persistent {
-		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
+		s.tempUnscheduleOpenAITransportErrorWithPolicy(ctx, account, safeErr, policy)
 	}
 
 	return &UpstreamFailoverError{
@@ -145,18 +149,7 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	}
 }
 
-// tempUnscheduleOpenAITransportError marks an account temporarily unschedulable
-// after a durable transport failure, both persistently (DB, survives restart)
-// and in-memory (immediate scheduler effect before the DB/account cache propagates).
-//
-// Log semantics:
-//   - "openai.account_temp_unscheduled_transport" — emitted ONLY after a
-//     successful DB write (both in-memory + persisted).
-//   - "openai.account_temp_unscheduled_transport_memory_only" — emitted when
-//     accountRepo is nil (in-memory only; no persistence).
-//   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
-//     but returned an error.
-func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
+func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportErrorWithPolicy(ctx context.Context, account *Account, safeErr string, policy TokenHiveResponsePolicy) {
 	if s == nil || account == nil {
 		return
 	}
@@ -165,7 +158,12 @@ func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Co
 
 	// Immediate in-memory block (honoured by the scheduler at selection time),
 	// effective even if the DB write below fails or the account cache lags.
-	s.BlockAccountScheduling(account, until, "transport_error")
+	if policy.AllowRuntimeBlock {
+		s.BlockAccountScheduling(account, until, "transport_error")
+	}
+	if !policy.AllowAccountMutation {
+		return
+	}
 
 	if s.accountRepo == nil {
 		// No DB configured — block is in-memory only; emit a distinct event so

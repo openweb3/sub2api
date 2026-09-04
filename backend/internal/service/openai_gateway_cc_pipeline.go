@@ -88,9 +88,22 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
+	return s.failoverOpenAIUpstreamHTTPErrorWithPolicy(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel, ordinaryTokenHiveResponsePolicy())
+}
+
+func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPErrorWithPolicy(
+	ctx context.Context,
+	c *gin.Context,
+	account *Account,
+	resp *http.Response,
+	respBody []byte,
+	upstreamMsg string,
+	upstreamModel string,
+	policy TokenHiveResponsePolicy,
+) *UpstreamFailoverError {
 	shouldFailover := s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody)
 	tempUnscheduled := false
-	if c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
+	if policy.AllowAccountMutation && c != nil && account != nil && account.Platform != PlatformGrok && !shouldFailover && !IsResponseCommitted(c) && s.rateLimitService != nil {
 		tempUnscheduled = s.rateLimitService.CheckErrorPolicy(ctx, account, resp.StatusCode, respBody, upstreamModel) == ErrorPolicyTempUnscheduled
 		shouldFailover = tempUnscheduled
 	}
@@ -100,7 +113,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	if account != nil && account.Platform == PlatformGrok {
 		s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 	}
-	if !shouldFailover {
+	if !shouldFailover || !policy.AllowAccountFailover {
 		return nil
 	}
 	upstreamDetail := ""
@@ -123,7 +136,7 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	})
 	shouldDisable := tempUnscheduled
 	if account.Platform != PlatformGrok && !tempUnscheduled {
-		shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, upstreamModel)
+		shouldDisable = s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, respBody, policy, upstreamModel)
 	}
 	return s.newOpenAIAccountFailoverError(
 		account,

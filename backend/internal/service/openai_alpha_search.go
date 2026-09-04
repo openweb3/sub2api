@@ -48,6 +48,11 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 		return nil, fmt.Errorf("sanitize alpha search request body: %w", err)
 	}
 	body = sanitizedBody
+	tokenHiveAccount, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account)
+	if err != nil {
+		return nil, fmt.Errorf("resolve tokenhive account: %w", err)
+	}
+	policy := s.ResolveTokenHiveResponsePolicy(account)
 
 	token, _, err := s.GetAccessToken(ctx, account)
 	if err != nil {
@@ -55,32 +60,37 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 
 	proxyURL := ""
-	if account.ProxyID != nil && account.Proxy != nil {
+	if tokenHiveAccount == nil && account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	if err := s.ensureOpenAIAlphaSearchAuthMetadata(ctx, account, token, proxyURL); err != nil {
-		return nil, err
-	}
 	SetOpsUpstreamModel(c, upstreamModel)
+	if tokenHiveAccount == nil {
+		if err := s.ensureOpenAIAlphaSearchAuthMetadata(ctx, account, token, proxyURL); err != nil {
+			return nil, err
+		}
 
-	// Codex Personal Access Token（at-...）目前可访问 ChatGPT Codex
-	// /responses，但会被 standalone /alpha/search 的 access enforcement
-	// 拒绝为 no_matching_rule。对 PAT 账号使用等价的 hosted web_search
-	// Responses 路径兜底，避免把可用账号误判为搜索不可用。
-	if account.IsOpenAIPersonalAccessToken() {
-		return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
+		// Codex Personal Access Token（at-...）目前可访问 ChatGPT Codex
+		// /responses，但会被 standalone /alpha/search 的 access enforcement
+		// 拒绝为 no_matching_rule。对普通 PAT 账号使用等价的 hosted web_search
+		// Responses 路径兜底；TokenHive 映射账号始终使用 canonical alpha/search。
+		if account.IsOpenAIPersonalAccessToken() {
+			return s.forwardAlphaSearchViaResponsesWebSearch(ctx, c, account, body, token, proxyURL, requestedModel, upstreamModel)
+		}
 	}
 
 	req, err := s.buildOpenAIAlphaSearchRequest(ctx, c, account, body, token)
 	if err != nil {
 		return nil, err
 	}
+	if err := applyTokenHiveHandoff(ctx, s.cfg, tokenHiveAccount, getAPIKeyIDFromContext(c), upstreamModel, false, SourceOperationOpenAIAlphaSearch, req); err != nil {
+		return nil, fmt.Errorf("build tokenhive alpha search handoff: %w", err)
+	}
 
 	upstreamStart := time.Now()
 	resp, err := s.doOpenAIUpstream(req, proxyURL, account)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
-		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+		return nil, s.handleOpenAIUpstreamTransportErrorWithPolicy(ctx, c, account, err, true, policy)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -90,9 +100,12 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
+		if handled, executionErr := s.handleTrustedTokenHiveExecutionErrorResponse(resp, c, account, respBody, policy); handled {
+			return nil, executionErr
+		}
 		upstreamMessage := sanitizeUpstreamErrorMessage(strings.TrimSpace(extractUpstreamErrorMessage(respBody)))
-		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) ||
-			isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode) {
+		if policy.AllowAccountFailover && (s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMessage, respBody) ||
+			isOpenAIAlphaSearchEndpointUnsupported(account, resp.StatusCode)) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			// alpha/search 是独立的工具端点，单次 401 不能证明账号的模型调用
 			// 凭据全局失效。若沿用通用 401 逻辑，PAT 会因没有 refresh_token
@@ -101,7 +114,7 @@ func (s *OpenAIGatewayService) ForwardAlphaSearch(ctx context.Context, c *gin.Co
 			// 真正的凭据失效由普通 Responses 请求或 whoami 校验判定。
 			shouldDisable := false
 			if shouldApplyOpenAIAlphaSearchAccountErrorSideEffects(resp.StatusCode) {
-				shouldDisable = s.handleFailoverSideEffects(ctx, resp, account, respBody, openAIAlphaSearchSchedulingModel(account, requestedModel))
+				shouldDisable = s.handleFailoverSideEffectsWithPolicy(ctx, resp, account, respBody, policy, openAIAlphaSearchSchedulingModel(account, requestedModel))
 			}
 			retryableOnSameAccount := !shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(resp.StatusCode)
 			if account.IsOpenAIOAuthLike() && resp.StatusCode == http.StatusTooManyRequests {

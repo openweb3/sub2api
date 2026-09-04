@@ -4,9 +4,15 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -83,6 +89,58 @@ func TestGenerateSessionHash_EmptyRequest(t *testing.T) {
 	require.Empty(t, svc.GenerateSessionHash(&ParsedRequest{}))
 }
 
+func TestSessionPresenceForLogDoesNotExposeRawIdentifiers(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "empty", value: "", want: ""},
+		{name: "short token", value: "sk-ant", want: "[present]"},
+		{name: "long token", value: "long-request-body-feature-bearer-token-secret", want: "[present]"},
+		{name: "metadata session uuid", value: "123e4567-e89b-12d3-a456-426614174000", want: "[present]"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, sessionPresenceForLog(tc.value))
+		})
+	}
+}
+
+func TestStickyLogsDoNotReceiveRawSessionHash(t *testing.T) {
+	fset := token.NewFileSet()
+	var violations []string
+	for _, filename := range []string{"gateway_scheduling.go", "antigravity_gateway_retry.go"} {
+		file, err := parser.ParseFile(fset, filename, nil, 0)
+		require.NoError(t, err)
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "LegacyPrintf", "Debug", "Info", "Warn", "Error":
+			default:
+				return true
+			}
+			for _, arg := range call.Args {
+				ident, ok := arg.(*ast.Ident)
+				if ok && ident.Name == "sessionHash" {
+					violations = append(violations, fmt.Sprintf("%s passes raw sessionHash to %s", fset.Position(arg.Pos()), selector.Sel.Name))
+				}
+			}
+			return true
+		})
+	}
+
+	require.Empty(t, violations, "sticky identifiers must pass through sessionPresenceForLog before logging")
+}
+
 func TestGenerateSessionHash_MetadataHasHighestPriority(t *testing.T) {
 	svc := &GatewayService{}
 	metadata := "user_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2_account__session_123e4567-e89b-12d3-a456-426614174000"
@@ -90,6 +148,131 @@ func TestGenerateSessionHash_MetadataHasHighestPriority(t *testing.T) {
 
 	hash := svc.GenerateSessionHash(parsed)
 	require.Equal(t, "123e4567-e89b-12d3-a456-426614174000", hash, "metadata session_id should have highest priority")
+}
+
+func TestGenerateSessionHashLogsDoNotExposeSensitiveInputs(t *testing.T) {
+	sink, restore := captureStructuredLog(t)
+	defer restore()
+
+	tests := []struct {
+		name              string
+		parsed            func(t *testing.T) *ParsedRequest
+		wantMessages      []string
+		wantFields        []map[string]any
+		protectedLiterals []string
+	}{
+		{
+			name: "valid metadata",
+			parsed: func(t *testing.T) *ParsedRequest {
+				metadata := `{"device_id":"device-request-body-feature","account_uuid":"account-bearer-token-secret","session_id":"session-sk-ant-test-secret"}`
+				return mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "hello")}, metadata), nil)
+			},
+			wantMessages: []string{"sticky.hash_source"},
+			wantFields: []map[string]any{{
+				"source":                   "metadata_user_id",
+				"session_hash_present":     true,
+				"metadata_user_id_present": true,
+				"is_new_format":            true,
+			}},
+			protectedLiterals: []string{
+				"device-request-body-feature",
+				"account-bearer-token-secret",
+				"session-sk-ant-test-secret",
+			},
+		},
+		{
+			name: "invalid metadata",
+			parsed: func(t *testing.T) *ParsedRequest {
+				metadata := "invalid-request-body-feature-bearer-token-secret"
+				return mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "fallback")}, metadata), nil)
+			},
+			wantMessages: []string{"sticky.hash_metadata_parse_failed", "sticky.hash_source"},
+			wantFields: []map[string]any{
+				{"metadata_user_id_present": true, "parsed_nil": true},
+				{"source": "message_content_fallback", "session_hash_present": true},
+			},
+			protectedLiterals: []string{
+				"invalid-request-body-feature-bearer-token-secret",
+			},
+		},
+		{
+			name: "cacheable content",
+			parsed: func(t *testing.T) *ParsedRequest {
+				system := []any{map[string]any{
+					"type":          "text",
+					"text":          "cacheable-request-body-feature-bearer-token-secret",
+					"cache_control": map[string]any{"type": "ephemeral"},
+				}}
+				return mustParseSessionHashRequest(t, anthropicSessionBody(system, []any{msg("user", "hello")}, ""), nil)
+			},
+			wantMessages: []string{"sticky.hash_source"},
+			wantFields: []map[string]any{{
+				"source":               "cacheable_content",
+				"session_hash_present": true,
+			}},
+			protectedLiterals: []string{
+				"cacheable-request-body-feature-bearer-token-secret",
+			},
+		},
+		{
+			name: "message fallback",
+			parsed: func(t *testing.T) *ParsedRequest {
+				return mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "message-request-body-feature-sk-ant-test-secret")}, ""), nil)
+			},
+			wantMessages: []string{"sticky.hash_source"},
+			wantFields: []map[string]any{{
+				"source":               "message_content_fallback",
+				"session_hash_present": true,
+			}},
+			protectedLiterals: []string{
+				"message-request-body-feature-sk-ant-test-secret",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			resetInMemoryLogSink(sink)
+			sessionHash := (&GatewayService{}).GenerateSessionHash(tc.parsed(t))
+			require.NotEmpty(t, sessionHash)
+
+			events := snapshotInMemoryLogEvents(sink)
+			messages := make([]string, 0, len(events))
+			for _, event := range events {
+				if event == nil || !strings.HasPrefix(event.Message, "sticky.hash_") {
+					continue
+				}
+				messages = append(messages, event.Message)
+				for _, forbiddenField := range []string{"session_id", "device_id", "metadata_user_id", "hash"} {
+					require.NotContains(t, event.Fields, forbiddenField)
+				}
+				serializedFields := fmt.Sprint(event.Fields)
+				require.NotContains(t, serializedFields, sessionHash)
+				for _, protected := range tc.protectedLiterals {
+					require.NotContains(t, serializedFields, protected)
+				}
+			}
+			require.Equal(t, tc.wantMessages, messages)
+			require.Len(t, events, len(tc.wantFields))
+			for i, wantFields := range tc.wantFields {
+				for key, want := range wantFields {
+					require.Equal(t, want, events[i].Fields[key], "event %d field %s", i, key)
+				}
+			}
+		})
+	}
+}
+
+func resetInMemoryLogSink(sink *inMemoryLogSink) {
+	sink.mu.Lock()
+	sink.events = nil
+	sink.mu.Unlock()
+}
+
+func snapshotInMemoryLogEvents(sink *inMemoryLogSink) []*logger.LogEvent {
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	return append([]*logger.LogEvent(nil), sink.events...)
 }
 
 func TestGenerateSessionHash_SystemPlusMessages(t *testing.T) {

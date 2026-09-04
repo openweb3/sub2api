@@ -197,7 +197,7 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 		logger.LegacyPrintf("service.identity", "Warning: failed to cache fingerprint for account %d: %v", accountID, err)
 	}
 
-	logger.LegacyPrintf("service.identity", "Created new fingerprint for account %d with client_id: %s", accountID, fp.ClientID)
+	logger.LegacyPrintf("service.identity", "Created new fingerprint for account %d with client_id_present=true", accountID)
 	return fp, nil
 }
 
@@ -395,7 +395,7 @@ func (s *IdentityService) RewriteUserIDWithMasking(ctx context.Context, body []b
 	if maskedSessionID == "" {
 		// 首次或已过期，生成新的伪装 session ID
 		maskedSessionID = generateRandomUUID()
-		logger.LegacyPrintf("service.identity", "Generated new masked session ID for account %d: %s", account.ID, maskedSessionID)
+		logger.LegacyPrintf("service.identity", "Generated new masked session ID for account %d (present=true)", account.ID)
 	}
 
 	// 刷新 TTL（每次请求都刷新，保持 15 分钟有效期）
@@ -409,8 +409,9 @@ func (s *IdentityService) RewriteUserIDWithMasking(ctx context.Context, body []b
 
 	slog.Debug("session_id_masking_applied",
 		"account_id", account.ID,
-		"before", userID,
-		"after", newUserID,
+		"metadata_user_id_before_present", strings.TrimSpace(userID) != "",
+		"metadata_user_id_after_present", strings.TrimSpace(newUserID) != "",
+		"metadata_user_id_changed", newUserID != userID,
 	)
 
 	if newUserID == userID {

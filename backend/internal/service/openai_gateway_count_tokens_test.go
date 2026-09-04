@@ -119,6 +119,11 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPl
 			body:       `{"error":{"type":"invalid_request_error","code":"missing_scope","message":"You have insufficient permissions for this operation. Missing scopes: api.responses.write."}}`,
 		},
 		{
+			name:       "401_input_tokens_unsupported_authentication_envelope",
+			statusCode: http.StatusUnauthorized,
+			body:       `{"error":{"type":"authentication_error","code":"invalid_api_key","message":"input_tokens unsupported"}}`,
+		},
+		{
 			name:       "403_missing_responses_write_scope",
 			statusCode: http.StatusForbidden,
 			body:       `{"error":{"type":"invalid_request_error","code":"missing_scope","message":"Missing scopes: api.responses.write"}}`,
@@ -160,6 +165,7 @@ func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_OAuthFallsBackWhenPl
 			require.Equal(t, http.StatusOK, rec.Code)
 			require.JSONEq(t, `{"input_tokens":`+strconv.Itoa(expectedEstimate)+`}`, rec.Body.String())
 			require.NotNil(t, upstream.lastReq)
+			require.Len(t, upstream.requests, 1, "local fallback must follow exactly one upstream request")
 			require.Equal(t, "https://api.openai.com/v1/responses/input_tokens", upstream.lastReq.URL.String())
 			require.Equal(t, "Bearer oauth-token", upstream.lastReq.Header.Get("authorization"))
 			require.Empty(t, upstream.lastReq.Header.Get("Chatgpt-Account-Id"))
@@ -186,6 +192,62 @@ func TestOpenAIGatewayService_OpenAIOAuthInputTokensFallbackUsesMinimumWhenEstim
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.JSONEq(t, `{"input_tokens":1}`, rec.Body.String())
+}
+
+func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_TokenHiveExecutionErrorBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const executionBody = `{"error":{"message":"proxy request failed EXECUTION_MESSAGE_SECRET","source":"bee","type":"credential_unavailable"}}`
+	const providerBody = `{"error":{"message":"provider unavailable","type":"server_error"}}`
+	tests := []struct {
+		name      string
+		dedicated bool
+		status    int
+		header    string
+		body      string
+		wantErr   string
+		wantBody  string
+	}{
+		{name: "trusted dedicated execution error", dedicated: true, status: http.StatusBadGateway, header: "1", body: executionBody, wantErr: "tokenhive execution error", wantBody: `{"error":{"message":"TokenHive execution failed","source":"bee","type":"credential_unavailable"}}`},
+		{name: "dedicated body lookalike without marker", dedicated: true, status: http.StatusBadGateway, body: executionBody, wantErr: "input_tokens upstream error", wantBody: `{"type":"error","error":{"message":"Upstream service temporarily unavailable","type":"upstream_error"}}`},
+		{name: "dedicated marker with invalid type", dedicated: true, status: http.StatusBadGateway, header: "1", body: `{"error":{"message":"provider supplied","source":"bee","type":"provider_supplied"}}`, wantErr: "input_tokens upstream error", wantBody: `{"type":"error","error":{"message":"Upstream service temporarily unavailable","type":"upstream_error"}}`},
+		{name: "ordinary account cannot trust marker", status: http.StatusBadGateway, header: "1", body: executionBody, wantErr: "input_tokens upstream error", wantBody: `{"type":"error","error":{"message":"Upstream service temporarily unavailable","type":"upstream_error"}}`},
+		{name: "dedicated provider 400 unchanged", dedicated: true, status: http.StatusBadRequest, body: providerBody, wantErr: "input_tokens upstream error", wantBody: `{"type":"error","error":{"message":"Upstream request failed","type":"upstream_error"}}`},
+		{name: "dedicated provider 500 unchanged", dedicated: true, status: http.StatusInternalServerError, body: providerBody, wantErr: "input_tokens upstream error", wantBody: `{"type":"error","error":{"message":"Upstream service temporarily unavailable","type":"upstream_error"}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := []byte(`{"model":"claude-opus-4-1","messages":[{"role":"user","content":"hello"}]}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("api_key", &APIKey{ID: 707})
+			account := &Account{ID: 62, Name: "count-boundary", Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+				Status: StatusActive, Schedulable: true, Credentials: map[string]any{"api_key": "upstream-auth-secret", "base_url": "https://relay.example"}}
+			cfg := &config.Config{}
+			var registry *TokenHiveRegistry
+			if test.dedicated {
+				cfg.TokenHive = tokenHiveConfigForTest(account.ID)
+				var err error
+				registry, err = NewTokenHiveRegistry(cfg.TokenHive, []Account{*account})
+				require.NoError(t, err)
+			}
+			header := http.Header{"Content-Type": []string{"application/json"}}
+			if test.header != "" {
+				header.Set("X-TokenHive-Execution-Error", test.header)
+			}
+			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: test.status, Header: header, Body: io.NopCloser(strings.NewReader(test.body))}}
+			svc := &OpenAIGatewayService{cfg: cfg, tokenHiveRegistry: registry, httpUpstream: upstream}
+
+			err := svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, body, "gpt-5.4")
+
+			require.ErrorContains(t, err, test.wantErr)
+			require.Len(t, upstream.requests, 1)
+			require.Equal(t, test.status, recorder.Code)
+			require.JSONEq(t, test.wantBody, recorder.Body.String())
+			require.NotContains(t, recorder.Body.String(), "EXECUTION_MESSAGE_SECRET")
+		})
+	}
 }
 
 func TestEstimateOpenAIInputTokens_RequestSamples(t *testing.T) {

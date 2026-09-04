@@ -470,10 +470,14 @@ func (s *OpenAIGatewayService) readUpstreamErrorBody(resp *http.Response) []byte
 }
 
 func (s *OpenAIGatewayService) handleFailoverSideEffects(ctx context.Context, resp *http.Response, account *Account, responseBody []byte, canonicalModel ...string) bool {
+	return s.handleFailoverSideEffectsWithPolicy(ctx, resp, account, responseBody, ordinaryTokenHiveResponsePolicy(), canonicalModel...)
+}
+
+func (s *OpenAIGatewayService) handleFailoverSideEffectsWithPolicy(ctx context.Context, resp *http.Response, account *Account, responseBody []byte, policy TokenHiveResponsePolicy, canonicalModel ...string) bool {
 	if len(canonicalModel) > 0 {
-		return s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody, canonicalModel[0])
+		return s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, responseBody, policy, canonicalModel[0])
 	}
-	return s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, responseBody)
+	return s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, responseBody, policy)
 }
 
 func (s *OpenAIGatewayService) handleErrorResponse(
@@ -484,8 +488,23 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	requestBody []byte,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
+	return s.handleErrorResponseWithPolicy(ctx, resp, c, account, requestBody, ordinaryTokenHiveResponsePolicy(), requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleErrorResponseWithPolicy(
+	ctx context.Context,
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	requestBody []byte,
+	policy TokenHiveResponsePolicy,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
 	body = s.redactAgentIdentitySensitiveBody(ctx, account, body)
+	if handled, err := s.handleTrustedTokenHiveExecutionErrorResponse(resp, c, account, body, policy); handled {
+		return nil, err
+	}
 
 	// cyber_policy 硬阻断：透传上游原始错误体给客户端（不重包成通用 502），不冷却账号。
 	// 当前请求恒透传（需求1）；标记供 handler 事后写风控/邮件。400 cyber 不可 failover
@@ -558,7 +577,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 			Message:            upstreamMsg,
 			Detail:             upstreamDetail,
 		})
-		s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, requestedModel...)
+		s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, body, policy, requestedModel...)
 		return nil, newOpenAIUpstreamFailoverError(
 			resp.StatusCode,
 			resp.Header,
@@ -627,7 +646,7 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 		reqModel, _, _ = extractOpenAIRequestMetaFromBody(requestBody)
 		reqModel = canonicalOpenAIAccountSchedulingModel(account, reqModel)
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, reqModel)
+	shouldDisable := s.handleOpenAIAccountUpstreamErrorWithPolicy(ctx, account, resp.StatusCode, resp.Header, body, policy, reqModel)
 	kind := "http_error"
 	if shouldDisable {
 		kind = "failover"
@@ -713,6 +732,70 @@ func (s *OpenAIGatewayService) handleErrorResponse(
 	return nil, fmt.Errorf("upstream error: %d message=%s", resp.StatusCode, upstreamMsg)
 }
 
+func (s *OpenAIGatewayService) handleTrustedTokenHiveExecutionErrorResponse(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	body []byte,
+	policy TokenHiveResponsePolicy,
+) (bool, error) {
+	source, code, ok := trustedTokenHiveExecutionError(resp, body)
+	if !policy.Dedicated || !ok {
+		return false, nil
+	}
+
+	const clientMessage = "TokenHive execution failed"
+	setOpsUpstreamError(c, 0, clientMessage, "")
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform:    account.Platform,
+		AccountID:   account.ID,
+		AccountName: account.Name,
+		Kind:        "request_error",
+		Stage:       "tokenhive_execution",
+		Scope:       source,
+		Reason:      code,
+		Message:     clientMessage,
+	})
+	MarkResponseCommitted(c)
+	c.JSON(resp.StatusCode, gin.H{"error": gin.H{"message": clientMessage, "source": source, "type": code}})
+	return true, fmt.Errorf("tokenhive execution error: source=%s code=%s", source, code)
+}
+
+func trustedTokenHiveExecutionError(resp *http.Response, body []byte) (string, string, bool) {
+	if resp == nil || resp.Header.Get("X-TokenHive-Execution-Error") != "1" {
+		return "", "", false
+	}
+	return parseTokenHiveExecutionError(body)
+}
+
+func parseTokenHiveExecutionError(body []byte) (string, string, bool) {
+	var envelope struct {
+		Error struct {
+			Source string `json:"source"`
+			Type   string `json:"type"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &envelope) != nil || (envelope.Error.Source != "hive" && envelope.Error.Source != "bee") {
+		return "", "", false
+	}
+	switch envelope.Error.Type {
+	case "no_capacity",
+		"ownership_persist_failed",
+		"bee_disconnected",
+		"adapter_unsupported",
+		"credential_unavailable",
+		"token_refresh_failed",
+		"target_not_allowed",
+		"upstream_connect_failed",
+		"stream_interrupted",
+		"cancelled",
+		"internal_error":
+		return envelope.Error.Source, envelope.Error.Type, true
+	default:
+		return "", "", false
+	}
+}
+
 // compatErrorWriter is the signature for format-specific error writers used by
 // the compat paths (Chat Completions and Anthropic Messages).
 type compatErrorWriter func(c *gin.Context, statusCode int, errType, message string)
@@ -727,6 +810,17 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	c *gin.Context,
 	account *Account,
 	writeError compatErrorWriter,
+	requestedModel ...string,
+) (*OpenAIForwardResult, error) {
+	return s.handleCompatErrorResponseWithPolicy(resp, c, account, writeError, ordinaryTokenHiveResponsePolicy(), requestedModel...)
+}
+
+func (s *OpenAIGatewayService) handleCompatErrorResponseWithPolicy(
+	resp *http.Response,
+	c *gin.Context,
+	account *Account,
+	writeError compatErrorWriter,
+	policy TokenHiveResponsePolicy,
 	requestedModel ...string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
@@ -820,8 +914,8 @@ func (s *OpenAIGatewayService) handleCompatErrorResponse(
 	if len(requestedModel) > 0 {
 		modelForCooldown = requestedModel[0]
 	}
-	shouldDisable := s.handleOpenAIAccountUpstreamError(
-		c.Request.Context(), account, resp.StatusCode, resp.Header, body, modelForCooldown,
+	shouldDisable := s.handleOpenAIAccountUpstreamErrorWithPolicy(
+		c.Request.Context(), account, resp.StatusCode, resp.Header, body, policy, modelForCooldown,
 	)
 	kind := "http_error"
 	if shouldDisable {

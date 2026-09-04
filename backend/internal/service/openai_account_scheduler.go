@@ -2402,6 +2402,10 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 		return false
 	}
 	if requiredTransport == OpenAIUpstreamTransportResponsesWebsocketV2Ingress {
+		if mapped, err := resolveTokenHiveAccount(s.cfg, s.tokenHiveRegistry, account); err != nil || mapped != nil {
+			return false
+		}
+
 		if s.cfg == nil || !s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 			return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == OpenAIUpstreamTransportResponsesWebsocketV2
 		}
@@ -2417,7 +2421,11 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 }
 
 func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
-	if account == nil {
+	return s.ReportOpenAIAccountScheduleResultWithPolicy(ordinaryTokenHiveResponsePolicy(), account, model, success, firstTokenMs, observedErr...)
+}
+
+func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResultWithPolicy(policy TokenHiveResponsePolicy, account *Account, model string, success bool, firstTokenMs *int, observedErr ...error) bool {
+	if account == nil || !policy.AllowSchedulerFeedback {
 		return false
 	}
 	accountID := account.ID
@@ -2451,6 +2459,13 @@ func (s *OpenAIGatewayService) ObserveOpenAIAccountHealthFailure(ctx context.Con
 }
 
 func (s *OpenAIGatewayService) RecordOpenAIAccountSwitch() {
+	s.RecordOpenAIAccountSwitchWithPolicy(ordinaryTokenHiveResponsePolicy())
+}
+
+func (s *OpenAIGatewayService) RecordOpenAIAccountSwitchWithPolicy(policy TokenHiveResponsePolicy) {
+	if !policy.AllowSchedulerFeedback {
+		return
+	}
 	scheduler := s.getOpenAIAccountScheduler(context.Background())
 	if scheduler == nil {
 		return
